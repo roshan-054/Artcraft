@@ -335,16 +335,6 @@ fn a_printer_that_lists_neither_pdf_nor_raster_is_refused_before_a_job_exists() 
     assert_eq!(printer.jobs(), 0);
 }
 
-#[test]
-fn a_denied_printer_is_refused_before_any_connection() {
-    // The environment is shared by every test in the process, so the check is made on a station opened with
-    // the list given, exactly as the glue opens one with the list from the environment.
-    let denied = craft_print::parse_deny_list("brother");
-    let e = Station::open_denying("http://127.0.0.1:5357/brother-printer", None, None, denied).err().unwrap();
-    assert_eq!(e.kind(), photocraft_print::network::ErrorKind::Denied);
-    assert_eq!(failure(&e, true).kind, FailureKind::Policy);
-}
-
 /// The whole path through the Print dialog, drawn offscreen: pick the network destination, query the in-process
 /// printer, tick the confirmation, press Print, and see the page arrive and the status line name the printer.
 #[test]

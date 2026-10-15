@@ -210,26 +210,6 @@ fn draw(out: &mut [u8], (w, h): (usize, usize), (kx, ky): (f64, f64), p: &Primit
     }
 }
 
-/// Is a printer (by name) on the deny list, `CRAFT_PRINT_DENY` (legacy `PDFCRAFT_PRINT_DENY`)? The
-/// system printer lists leave such a printer out, and printing to it is refused. `None` stands for
-/// the system default printer, which is resolved to its name.
-pub fn printer_denied(name: Option<&str>) -> bool {
-    let denied = craft_print::deny_list();
-    if denied.is_empty() {
-        return false;
-    }
-    match name.filter(|n| !n.trim().is_empty()) {
-        Some(name) => craft_print::any_denied(&[name], &denied),
-        None => {
-            let mut names: Vec<String> = craft_print::printers().into_iter().filter(|p| p.default).map(|p| p.name).collect();
-            if let Ok(Some(default)) = craft_print::rgb::default_printer() {
-                names.push(default);
-            }
-            names.iter().any(|n| craft_print::any_denied(&[n.as_str()], &denied))
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -312,13 +292,5 @@ mod tests {
         let row = |p: &RasterPage| p.pixels[8 * 4..8 * 5].to_vec();
         assert_eq!(row(&plain), [0, 0, 0, 0, 255, 255, 255, 255]);
         assert_eq!(row(&mirrored), [255, 255, 255, 255, 0, 0, 0, 0]);
-    }
-
-    #[test]
-    fn a_denied_printer_name_is_recognised() {
-        // The env is process-wide: parse a list and ask directly through the library's matcher.
-        let denied = craft_print::parse_deny_list("brother");
-        assert!(craft_print::any_denied(&["Brother MFC-9330CDW"], &denied));
-        assert!(!craft_print::any_denied(&["Office Laser"], &denied));
     }
 }

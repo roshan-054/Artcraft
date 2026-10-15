@@ -11,9 +11,6 @@
 //!   sent as it is. One it does not list goes through the app's [`DocumentConverter`]; with no way
 //!   there the print is [`ErrorKind::UnsupportedFormat`] before a job exists.
 //! * **No retry of an unknown outcome.** `PrintJob` refuses to resend what may have printed.
-//! * **The deny list** (`CRAFT_PRINT_DENY`, legacy `PDFCRAFT_PRINT_DENY`) is checked by address
-//!   when a printer is opened and by the name it reports after a query, and enforced by the
-//!   registry for every request a job makes.
 
 use std::sync::{Arc, PoisonError, RwLock};
 
@@ -45,17 +42,6 @@ pub fn register_converter(converter: Arc<dyn DocumentConverter>) {
 
 pub(crate) fn registered_converter() -> Option<Arc<dyn DocumentConverter>> {
     CONVERTER.read().unwrap_or_else(PoisonError::into_inner).clone()
-}
-
-/// The refusal for a printer on the deny list: [`ErrorKind::Denied`], naming the variable and never
-/// the printer.
-pub(crate) fn denied_error() -> PrintError {
-    PrintError::new(ErrorKind::Denied, format!("the printer is on the deny list ({}); it was not opened and nothing was sent to it", craft_print::DENY_ENV))
-}
-
-/// Refuse when any of `texts` (an address, a name the printer reported) names a printer on `denied`.
-pub(crate) fn check_denied(denied: &[String], texts: &[&str]) -> Result<(), PrintError> {
-    if craft_print::any_denied(texts, denied) { Err(denied_error()) } else { Ok(()) }
 }
 
 /// What the person is told when a send failed and the printer may nevertheless have the document.
