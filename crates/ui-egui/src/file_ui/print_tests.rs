@@ -6,7 +6,7 @@ use crate::PhotocraftApp;
 use egui_kittest::{Harness, kittest::Queryable};
 
 fn printers() {
-    photocraft_engine::print_cmds::use_printer_list(Some(vec![("Front Desk".into(), false), ("Brother".into(), true)]));
+    photocraft_engine::print_cmds::use_printer_list(Some(vec![("Front Desk".into(), false), ("Laser Room".into(), true)]));
 }
 
 /// An app with a 60 x 40 document and the Print dialog open on the system printers (the Windows driver
@@ -76,8 +76,8 @@ fn one_printer_list_holds_the_system_printers_and_the_network_entry() {
     assert_eq!(count(&h, "Destination"), 0, "there is no second menu to pick the kind of printer from");
     assert!(!h.state().net_print.selected);
     assert_eq!(count(&h, "Printer address:"), 0, "the network section is hidden until its entry is chosen");
-    pick(&mut h, "Brother");
-    for entry in ["Front Desk", "Brother", "Network printer…"] {
+    pick(&mut h, "Laser Room");
+    for entry in ["Front Desk", "Laser Room", "Network printer…"] {
         assert!(
             count(&h, entry) > 0,
             "the list shows {entry}
@@ -86,7 +86,7 @@ fn one_printer_list_holds_the_system_printers_and_the_network_entry() {
         );
     }
     // The network entry comes after the real printers.
-    assert!(top(&h, "Front Desk") < top(&h, "Network printer…") && top(&h, "Brother") < top(&h, "Network printer…"));
+    assert!(top(&h, "Front Desk") < top(&h, "Network printer…") && top(&h, "Laser Room") < top(&h, "Network printer…"));
     pick(&mut h, "Network printer…");
     assert!(h.state().net_print.selected);
     assert!(count(&h, "Printer address:") > 0 && count(&h, "Query printer") > 0, "choosing the network entry shows its section");
@@ -130,15 +130,15 @@ fn a_queried_network_printer_is_its_own_entry_by_the_name_it_reported() {
     let entries = printer_entries(h.state(), &app_fields, None);
     let labels: Vec<&str> = entries.iter().map(|e| e.1.as_str()).collect();
     assert_eq!(labels.last().copied(), Some(known.as_str()));
-    for entry in ["Network printer…", "Front Desk", "Brother"] {
+    for entry in ["Network printer…", "Front Desk", "Laser Room"] {
         assert!(labels.contains(&entry), "{entry} stays in the list: {labels:?}");
     }
     assert_eq!(current_printer(h.state(), &app_fields), NETWORK_KNOWN);
     // A system printer leaves the network one; the address and its answer are kept for the session.
     let mut f = fields(&h, id);
-    choose_printer(h.state_mut(), &mut f, "Brother", false);
+    choose_printer(h.state_mut(), &mut f, "Laser Room", false);
     assert!(!h.state().net_print.selected);
-    assert_eq!(f["printer"], "Brother");
+    assert_eq!(f["printer"], "Laser Room");
     assert!(h.state().net_print.state.draft.printer().is_some());
     choose_printer(h.state_mut(), &mut f, NETWORK_ENTRY, false);
     assert!(h.state().net_print.selected, "the network entry is chosen again without retyping the address");
@@ -149,10 +149,10 @@ fn a_queried_network_printer_is_its_own_entry_by_the_name_it_reported() {
 fn the_windows_driver_list_has_the_default_first_and_marked() {
     let app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
     let mut f = Map::new();
-    f.insert("__printerDefault".into(), json!("Brother"));
-    let names = ["Front Desk".to_string(), "Brother".to_string(), "Zebra".to_string()];
+    f.insert("__printerDefault".into(), json!("Laser Room"));
+    let names = ["Front Desk".to_string(), "Laser Room".to_string(), "Zebra".to_string()];
     let entries = printer_entries(&app, &f, Some(&names));
-    assert_eq!(entries[0], ("Brother".to_string(), format!("Brother ({})", tl!("Default printer"))));
+    assert_eq!(entries[0], ("Laser Room".to_string(), format!("Laser Room ({})", tl!("Default printer"))));
     assert_eq!(entries[1].0, "Front Desk");
     assert_eq!(entries[2].0, "Zebra");
     #[cfg(network_print)]
