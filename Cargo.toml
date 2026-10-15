@@ -10,7 +10,8 @@ license = "MIT OR Apache-2.0"
 rust-version = "1.95"
 
 [workspace.dependencies]
-craft-ui = { git = "https://github.com/storytold/craft-libs", rev = "5c874d51eeb3de70e735c8ce87a59a7dedd47675", features = ["serde"] }
+# Shared frontend components; the network-printer destination (`printing::network`) is storytold/craft-libs#112 until it merges, then pin an immutable revision.
+craft-ui = { git = "https://github.com/storytold/craft-libs", rev = "refs/pull/112/head", features = ["serde"] }
 # internal
 photocraft-geom = { path = "crates/geom" }
 photocraft-color = { path = "crates/color" }
@@ -36,9 +37,13 @@ photocraft-engine = { path = "crates/engine" }
 photocraft-ui-egui = { path = "crates/ui-egui" }
 photocraft-testkit = { path = "crates/testkit" }
 photocraft-tablet = { path = "crates/tablet" }
+photocraft-print = { path = "crates/print" }
 
 # external
-craft-print = { git = "https://github.com/storytold/craft-libs", rev = "3d37da389a3618ab9b76109da11416e9ca4ea719" }
+# Shared print backends and registry (storytold/craft-libs#116: WS-Print, IPP, tracked jobs) until it merges. PhotoCraft also needs the print
+# deny list (`CRAFT_PRINT_DENY`), which is not upstream yet (local craft-libs branch gui9-craft-libs-2). The `wsd` and `ipp` features are chosen by
+# photocraft-print's `network-print` feature, so a build without it has the spooler only.
+craft-print = { git = "https://github.com/storytold/craft-libs", rev = "refs/pull/116/head", default-features = false }
 thiserror = "2"
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"

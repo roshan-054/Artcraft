@@ -4170,3 +4170,62 @@ navigator	Zoom	Zoom
 	This document's layers: {needed} of {budget} for layers	Capas de este documento: {needed} de {budget} para capas
 	This document's layers need {needed} but may hold {budget}: whole-document redraws use the CPU	Las capas de este documento necesitan {needed} pero pueden ocupar {budget}: los redibujados de todo el documento usan la CPU
 	GPU Memory (MB, 0 = Automatic)	Memoria de GPU (MB, 0 = Automático)
+
+# Network printer destination (WS-Print and IPP). Machine-drafted by Claude; not reviewed by a native speaker.
+	A setting isn't valid	Un ajuste no es válido
+	Accepted by {printer}	Aceptado por {printer}
+	Asking the printer…	Consultando la impresora…
+	Black and white	Blanco y negro
+	Canceling…	Cancelando…
+	Colour	Color
+	Colour:	Color:
+	Copies:	Copias:
+	Couldn't reach the printer	No se pudo conectar con la impresora
+	Flip on long edge	Girar por el borde largo
+	Flip on short edge	Girar por el borde corto
+	Held by the printer	Retenido por la impresora
+	I confirm sending this document to this printer	Confirmo el envío de este documento a esta impresora
+	Network printer	Impresora de red
+	Network printer (WS-Print or IPP)	Impresora de red (WS-Print o IPP)
+	Not confirmed by the printer.	No confirmado por la impresora.
+	Only IP addresses on this network are accepted (private, link-local or loopback), not host names.	Solo se aceptan direcciones IP de esta red (privadas, de enlace local o de bucle), no nombres de host.
+	Print status	Estado de impresión
+	Printed with errors	Impreso con errores
+	Printed with warnings	Impreso con advertencias
+	Printer address:	Dirección de la impresora:
+	Printer orientation:	Orientación de la impresora:
+	Printer status: {state}	Estado de la impresora: {state}
+	Quality:	Calidad:
+	Query printer	Consultar impresora
+	Query the printer and tick the confirmation first.	Consulte primero la impresora y marque la confirmación.
+	Query the printer first to see what it supports.	Consulte primero la impresora para ver qué admite.
+	Reasons: {reasons}	Motivos: {reasons}
+	Reverse landscape	Horizontal invertido
+	Reverse portrait	Vertical invertido
+	Sending to the network printer…	Enviando a la impresora de red…
+	Sending to {printer}…	Enviando a {printer}…
+	Sent. The printer can't say whether it printed.	Enviado. La impresora no puede decir si imprimió.
+	Sheets printed: {done} of {total}	Hojas impresas: {done} de {total}
+	Sheets printed: {n}	Hojas impresas: {n}
+	Still printing; the job continues on the printer	Aún imprimiendo; el trabajo continúa en la impresora
+	The document couldn't be prepared	No se pudo preparar el documento
+	The job was canceled	Se canceló el trabajo
+	The print job stopped unexpectedly	El trabajo de impresión se detuvo de forma inesperada
+	The printer accepts none of the formats this document can be sent in	La impresora no acepta ninguno de los formatos en que se puede enviar este documento
+	The printer address was refused	Se rechazó la dirección de la impresora
+	The printer doesn't support this setting	La impresora no admite este ajuste
+	The printer is printing it	La impresora lo está imprimiendo
+	The printer may have received the document. Check the printer before sending again.	Es posible que la impresora haya recibido el documento. Compruebe la impresora antes de volver a enviar.
+	The printer no longer lists the job; it most likely finished	La impresora ya no muestra el trabajo; lo más probable es que haya terminado
+	The printer paused the job; it needs attention	La impresora pausó el trabajo; necesita atención
+	The printer refused the request	La impresora rechazó la solicitud
+	The printer stopped the job	La impresora detuvo el trabajo
+	The printer's reply couldn't be understood	No se pudo entender la respuesta de la impresora
+	This printer does not take a quality setting.	Esta impresora no admite un ajuste de calidad.
+	This printer does not take a resolution setting.	Esta impresora no admite un ajuste de resolución.
+	This printer does not take an orientation setting.	Esta impresora no admite un ajuste de orientación.
+	This printer only prints in black and white.	Esta impresora solo imprime en blanco y negro.
+	This printer only prints one-sided.	Esta impresora solo imprime por una cara.
+	This printer prints one copy at a time.	Esta impresora imprime una copia cada vez.
+	Two-sided:	A doble cara:
+	Waiting in the printer's queue	Esperando en la cola de la impresora

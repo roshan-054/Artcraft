@@ -14,7 +14,10 @@
 
 use std::io::Write as _;
 
+mod network;
 mod windows_marks;
+
+pub use network::{NetworkPrint, prepare_network_print, printer_denied};
 
 use photocraft_color::ColorMode;
 use photocraft_doc::{Document, LayerContent, SmartSource};
@@ -376,8 +379,11 @@ fn do_print(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
     Ok(result)
 }
 
-fn render_and_spool(doc: &Document, p: &Value, cmd: &str) -> Result<Value> {
-    let PrintLayout { paper: (pw, ph), rect: (x, y, w, h), scale, marks, emulsion_down } = layout(doc, p, cmd)?;
+/// The page the Print parameters `p` describe: layout, flattened and colour-handled image, marks and
+/// texts. Shared by the spooler paths and the network printer.
+fn make_page(doc: &Document, p: &Value, cmd: &str) -> Result<(PrintPage, PrintLayout, Value)> {
+    let l = layout(doc, p, cmd)?;
+    let PrintLayout { paper, rect, marks, emulsion_down, .. } = l;
     let (img, color) = print_image(doc, p, cmd)?;
     let description = p
         .get("description")
@@ -385,7 +391,11 @@ fn render_and_spool(doc: &Document, p: &Value, cmd: &str) -> Result<Value> {
         .unwrap_or(false)
         .then(|| crate::file_cmds::read_file_info(doc.metadata.xmp.as_deref())["description"].as_str().unwrap_or_default().to_string());
     let label = p.get("labels").and_then(Value::as_bool).unwrap_or(false).then(|| doc.name.clone());
-    let page = PrintPage { paper: (pw, ph), image: img, rect: (x, y, w, h), marks, description, label, emulsion_down };
+    Ok((PrintPage { paper, image: img, rect, marks, description, label, emulsion_down }, l, color))
+}
+
+fn render_and_spool(doc: &Document, p: &Value, cmd: &str) -> Result<Value> {
+    let (page, PrintLayout { paper: (pw, ph), rect: (x, y, w, h), scale, emulsion_down, .. }, color) = make_page(doc, p, cmd)?;
     let output = p.get("output").and_then(Value::as_str).filter(|v| !v.is_empty()).map(str::to_string);
     let send = p.get("send").and_then(Value::as_bool).unwrap_or(output.is_none());
     let copies = crate::commands::int(p, "copies").unwrap_or(1).clamp(1, 999) as u32;
@@ -427,6 +437,7 @@ fn render_and_spool(doc: &Document, p: &Value, cmd: &str) -> Result<Value> {
     let mut spool = Value::Null;
     if send && !dry {
         require_printing_enabled()?;
+        refuse_denied(job.printer.as_deref())?;
         spool = json!(craft_print::submit(&pdf, &job).map_err(other)?);
         sent = true;
     }
@@ -458,10 +469,21 @@ fn remember_print(s: &mut Session, p: &Value) {
 
 /// The `printer` parameter, or the system's default printer.
 fn printer_name(p: &Value) -> Result<String> {
-    if let Some(name) = p.get("printer").and_then(Value::as_str).filter(|v| !v.trim().is_empty()) {
-        return Ok(name.to_string());
+    let name = match p.get("printer").and_then(Value::as_str).filter(|v| !v.trim().is_empty()) {
+        Some(name) => name.to_string(),
+        None => craft_print::rgb::default_printer().map_err(other)?.ok_or_else(|| other("no printer chosen and no default printer is set"))?,
+    };
+    refuse_denied(Some(&name))?;
+    Ok(name)
+}
+
+/// Printing to a printer on the deny list (`CRAFT_PRINT_DENY`) is refused before anything is
+/// spooled; `None` is the system default printer.
+fn refuse_denied(printer: Option<&str>) -> Result<()> {
+    if printer_denied(printer) {
+        return Err(other(format!("the printer is on the deny list ({}); nothing was sent to it", craft_print::DENY_ENV)));
     }
-    craft_print::rgb::default_printer().map_err(other)?.ok_or_else(|| other("no printer chosen and no default printer is set"))
+    Ok(())
 }
 
 /// The driver settings chosen with Print Settings… (`printerSettings`, hex), when any.
@@ -537,7 +559,9 @@ fn print_windows(page: &PrintPage, p: &Value, title: &str, copies: u32) -> Resul
 
 fn printers(_: &mut Session, _: &Value) -> Result<Value> {
     match craft_print::rgb::printers() {
-        Ok(list) => Ok(json!({"supported": true, "printers": list.iter().map(|p| json!({"name": p.name, "default": p.default})).collect::<Vec<_>>()})),
+        Ok(list) => Ok(
+            json!({"supported": true, "printers": list.iter().filter(|p| !printer_denied(Some(&p.name))).map(|p| json!({"name": p.name, "default": p.default})).collect::<Vec<_>>()}),
+        ),
         Err(craft_print::rgb::PrintError::Unsupported) => Ok(json!({"supported": false, "printers": []})),
         Err(e) => Err(other(e)),
     }
@@ -576,7 +600,8 @@ fn require_printing_enabled() -> Result<()> {
 /// The printers the system spooler knows (Print's Printer menu): CUPS queues and driverless
 /// destinations on macOS and Linux, `Win32_Printer` on Windows, none in the browser.
 fn system_printers(_: &mut Session, _: &Value) -> Result<Value> {
-    let list = craft_print::printers();
+    // A printer on the deny list is not offered (the registry's lists leave it out the same way).
+    let list: Vec<_> = craft_print::printers().into_iter().filter(|p| !printer_denied(Some(&p.name))).collect();
     let default = list.iter().find(|p| p.default).map(|p| p.name.clone());
     let printers: Vec<Value> = list.into_iter().map(|p| json!({"name": p.name, "default": p.default})).collect();
     Ok(json!({"printers": printers, "default": default}))

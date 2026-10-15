@@ -767,7 +767,29 @@ pub fn open_print(app: &mut PhotocraftApp) -> u64 {
             f.remove("printerSettings");
         }
     }
+    #[cfg(network_print)]
+    app.net_print.state.dialog_opened();
     app.ui.open_dialog(DialogKind::Command, f)
+}
+
+/// Is the destination the network printer (WS-Print or IPP) rather than a system printer? Never, in a
+/// build without network printing.
+fn to_network(app: &PhotocraftApp) -> bool {
+    #[cfg(network_print)]
+    {
+        app.net_print.selected
+    }
+    #[cfg(not(network_print))]
+    {
+        let _ = app;
+        false
+    }
+}
+
+/// Whether OK (and Enter) may confirm the Print dialog: not while the network printer's section says
+/// what is missing (a query, the confirmation, a setting the printer cannot take).
+pub fn can_confirm(f: &Map<String, Value>) -> bool {
+    !(f.contains_key("__print") && b(f, "__netBlocked", false))
 }
 
 /// Takes the paper from the printer's driver settings (Windows), as Photoshop does.
@@ -870,7 +892,9 @@ fn print_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Va
     // PDF exports and previews retain editable paper on Windows too. Only a real native
     // submission takes its media from the printer; entering that mode refreshes the driver
     // geometry after any export-only paper edits.
-    let printers: Option<Vec<String>> = if !b(f, "dryRun", false) && s(f, "output", "").is_empty() {
+    let network = to_network(app);
+    f.insert("__netBlocked".into(), json!(network));
+    let printers: Option<Vec<String>> = if !network && !b(f, "dryRun", false) && s(f, "output", "").is_empty() {
         f.get("__printers").and_then(Value::as_array).map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
     } else {
         None
@@ -954,199 +978,249 @@ fn print_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Va
         ui.add_space(12.0);
         ui.vertical(|ui| {
             ui.set_width(340.0);
-            let head = |ui: &mut egui::Ui, s: &str| {
-                ui.add_space(4.0);
-                ui.label(egui::RichText::new(s).font(crate::theme::semibold(12.0)).color(t.text));
-            };
-            head(ui, tl!("Printer Setup"));
-            if let Some(printers) = &printers {
-                // Windows: Photoshop's Printer menu and Print Settings… (the driver's own dialog).
-                ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new(tl!("Printer")).color(t.text_dim));
-                    let before = s(f, "printer", "");
-                    let opts: Vec<(&str, &str)> = printers.iter().map(|n| (n.as_str(), n.as_str())).collect();
-                    dropdown_str(ui, "print-printer", f, "printer", &opts, 220.0);
-                    if s(f, "printer", "") != before {
-                        f.remove("printerSettings");
-                        driver_page(f);
-                    }
-                });
-                ui.horizontal(|ui| {
-                    number(ui, f, "copies", tl!("Copies"), 1.0..=999.0, "", 1.0);
-                    if ui.button(tl!("Print Settings…")).clicked() {
-                        let printer = s(f, "printer", "");
-                        let current = f.get("printerSettings").and_then(Value::as_str).and_then(|h| craft_print::rgb::DevMode::from_hex(h).ok());
-                        match craft_print::rgb::settings_dialog(&printer, current.as_ref(), None) {
-                            Ok(Some(dm)) => {
-                                f.insert("printerSettings".into(), json!(dm.to_hex()));
-                                driver_page(f);
-                            }
-                            Ok(None) => {}
-                            Err(e) => {
-                                f.insert("__pageError".into(), json!(e.to_string()));
-                            }
-                        }
-                    }
-                });
-                let paper = p.get("paper").and_then(Value::as_array).map(|a| (a.first().and_then(Value::as_f64), a.get(1).and_then(Value::as_f64)));
-                let text = match paper {
-                    Some((Some(w), Some(h))) => format!("{:.0} × {:.0} mm  ·  {}", w / 72.0 * 25.4, h / 72.0 * 25.4, tl!("set in Print Settings…")),
-                    _ => String::new(),
+            // The network printer's section is long: the settings scroll, so Print and Cancel stay in view.
+            let room = (ui.ctx().content_rect().height() - 190.0).max(240.0);
+            egui::ScrollArea::vertical().id_salt("print-settings").max_height(room).show(ui, |ui| {
+                let head = |ui: &mut egui::Ui, s: &str| {
+                    ui.add_space(4.0);
+                    ui.label(egui::RichText::new(s).font(crate::theme::semibold(12.0)).color(t.text));
                 };
-                ui.label(egui::RichText::new(text).color(t.text_dim).size(11.0));
-                if let Some(e) = f.get("__pageError").and_then(Value::as_str) {
-                    ui.label(egui::RichText::new(e).color(t.warning).size(11.0));
-                }
-            } else {
+                head(ui, tl!("Printer Setup"));
+                #[cfg(network_print)]
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new(tl!("Printer")).color(t.text_dim));
-                    let mut pr = s(f, "printer", "");
-                    let opts = printer_options(f.get("__systemPrinters"), &pr);
-                    let o: Vec<(String, &str)> = opts.iter().map(|(k, l)| (k.clone(), l.as_str())).collect();
-                    if crate::widgets::dropdown(ui, "print-printer", &mut pr, &o, 240.0) {
-                        f.insert("printer".into(), json!(pr));
+                    ui.label(egui::RichText::new(crate::i18n::t("Destination")).color(t.text_dim));
+                    let mut destination = if app.net_print.selected { "network" } else { "system" }.to_string();
+                    let choices =
+                        [("system".to_string(), crate::i18n::t("Printer")), ("network".to_string(), crate::i18n::t("Network printer (WS-Print or IPP)"))];
+                    if crate::widgets::dropdown(ui, "print-destination", &mut destination, &choices, 240.0) {
+                        app.net_print.selected = destination == "network";
                     }
                 });
-                number(ui, f, "copies", tl!("Copies"), 1.0..=999.0, "", 1.0);
-                print_paper_controls(ui, f);
-            }
-            head(ui, tl!("Color Management"));
-            dropdown_str(
-                ui,
-                "print-color",
-                f,
-                "colorHandling",
-                &[
-                    ("printerManages", tl!("Printer Manages Colors")),
-                    ("photocraftManages", tl!("PhotoCraft Manages Colors")),
-                    ("noColorManagement", tl!("No Color Management")),
-                ],
-                240.0,
-            );
-            if s(f, "colorHandling", "") == "photocraftManages" {
-                // Photoshop's Printer Profile menu: the built-ins, then every installed printer
-                // (output class) profile by its description.
-                let installed: Vec<_> = photocraft_engine::installed_profiles::installed()
-                    .into_iter()
-                    .filter(|p| p.is_destination() && p.class == photocraft_cms::ProfileClass::Output)
-                    .collect();
-                let mut profiles: Vec<(&str, &str)> = vec![
-                    ("coated-cmyk", tl!("Coated CMYK")),
-                    ("srgb", "sRGB IEC61966-2.1"),
-                    ("adobe-rgb-compat", tl!("Adobe RGB (1998) compatible")),
-                    ("display-p3", tl!("Display P3")),
-                    ("gray-gamma-2.2", tl!("Gray Gamma 2.2")),
-                ];
-                profiles.extend(installed.iter().map(|p| (p.path.as_str(), p.description.as_str())));
-                // A remembered profile that is no longer installed still shows, by its file name.
-                let cur = s(f, "printerProfile", "coated-cmyk");
-                let stem = std::path::Path::new(&cur).file_stem().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-                if !profiles.iter().any(|(v, _)| *v == cur) {
-                    profiles.push((cur.as_str(), stem.as_str()));
-                }
-                dropdown_str(ui, "print-profile", f, "printerProfile", &profiles, 240.0);
-                ui.horizontal(|ui| {
-                    dropdown_str(
-                        ui,
-                        "print-intent",
-                        f,
-                        "intent",
-                        &[
-                            ("perceptual", tl!("Perceptual")),
-                            ("relative", tl!("Relative Colorimetric")),
-                            ("saturation", tl!("Saturation")),
-                            ("absolute", tl!("Absolute Colorimetric")),
-                        ],
-                        170.0,
-                    );
-                    check(ui, f, "bpc", tl!("Black Point Compensation"), true);
-                });
-                if printers.is_some() {
-                    ui.label(
-                        egui::RichText::new(tl!("Remember to turn off the printer's own colour management in Print Settings…")).color(t.warning).size(11.0),
-                    );
-                }
-            }
-            head(ui, tl!("Position and Size"));
-            dropdown_str(ui, "print-units", f, "units", &[("cm", tl!("Centimeters")), ("mm", tl!("Millimeters")), ("in", tl!("Inches"))], 130.0);
-            let units = s(f, "units", "cm");
-            check(ui, f, "center", tl!("Center"), true);
-            if !b(f, "center", true) {
-                ui.horizontal(|ui| {
-                    // Kept in inches (Photoshop's Position fields), shown in the chosen units.
-                    for (key, label) in [("top", tl!("Top")), ("left", tl!("Left"))] {
-                        let mut pt = n(f, key, 0.0) * 72.0;
-                        if length_field(ui, label, &mut pt, &units) {
-                            f.insert(key.into(), json!(pt / 72.0));
-                        }
-                    }
-                });
-            }
-            check(ui, f, "scaleToFit", tl!("Scale to Fit Media"), false);
-            // Scaled Print Size: Scale, Height and Width move together; Print Resolution follows.
-            if let Ok(l) = photocraft_engine::print_cmds::layout(&doc, &params(f), "file.print") {
-                let (_, _, w, h) = l.rect;
-                let (mut w2, mut h2) = (w, h);
-                let fit = b(f, "scaleToFit", false);
-                if !fit {
-                    // Two decimals: Height and Width set fractional scales.
+                if network {
+                    // The sheet is laid out here (paper, orientation, position, scale, marks); the printer's own
+                    // settings (copies, two-sided, quality, colour, resolution) are the network section below.
+                    print_paper_controls(ui, f);
+                } else if let Some(printers) = &printers {
+                    // Windows: Photoshop's Printer menu and Print Settings… (the driver's own dialog).
                     ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new(tl!("Scale")).color(t.text_dim));
-                        let mut v = n(f, "scale", 100.0) as f32;
-                        crate::widgets::value_field(ui, &mut v, 1.0..=1000.0, "%", 64.0);
-                        f.insert("scale".into(), json!((f64::from(v) * 100.0).round() / 100.0));
+                        ui.label(egui::RichText::new(tl!("Printer")).color(t.text_dim));
+                        let before = s(f, "printer", "");
+                        let opts: Vec<(&str, &str)> = printers.iter().map(|n| (n.as_str(), n.as_str())).collect();
+                        dropdown_str(ui, "print-printer", f, "printer", &opts, 220.0);
+                        if s(f, "printer", "") != before {
+                            f.remove("printerSettings");
+                            driver_page(f);
+                        }
+                    });
+                    ui.horizontal(|ui| {
+                        number(ui, f, "copies", tl!("Copies"), 1.0..=999.0, "", 1.0);
+                        if ui.button(tl!("Print Settings…")).clicked() {
+                            let printer = s(f, "printer", "");
+                            let current = f.get("printerSettings").and_then(Value::as_str).and_then(|h| craft_print::rgb::DevMode::from_hex(h).ok());
+                            match craft_print::rgb::settings_dialog(&printer, current.as_ref(), None) {
+                                Ok(Some(dm)) => {
+                                    f.insert("printerSettings".into(), json!(dm.to_hex()));
+                                    driver_page(f);
+                                }
+                                Ok(None) => {}
+                                Err(e) => {
+                                    f.insert("__pageError".into(), json!(e.to_string()));
+                                }
+                            }
+                        }
+                    });
+                    let paper = p.get("paper").and_then(Value::as_array).map(|a| (a.first().and_then(Value::as_f64), a.get(1).and_then(Value::as_f64)));
+                    let text = match paper {
+                        Some((Some(w), Some(h))) => format!("{:.0} × {:.0} mm  ·  {}", w / 72.0 * 25.4, h / 72.0 * 25.4, tl!("set in Print Settings…")),
+                        _ => String::new(),
+                    };
+                    ui.label(egui::RichText::new(text).color(t.text_dim).size(11.0));
+                    if let Some(e) = f.get("__pageError").and_then(Value::as_str) {
+                        ui.label(egui::RichText::new(e).color(t.warning).size(11.0));
+                    }
+                } else {
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new(tl!("Printer")).color(t.text_dim));
+                        let mut pr = s(f, "printer", "");
+                        let opts = printer_options(f.get("__systemPrinters"), &pr);
+                        let o: Vec<(String, &str)> = opts.iter().map(|(k, l)| (k.clone(), l.as_str())).collect();
+                        if crate::widgets::dropdown(ui, "print-printer", &mut pr, &o, 240.0) {
+                            f.insert("printer".into(), json!(pr));
+                        }
+                    });
+                    number(ui, f, "copies", tl!("Copies"), 1.0..=999.0, "", 1.0);
+                    print_paper_controls(ui, f);
+                }
+                head(ui, tl!("Color Management"));
+                dropdown_str(
+                    ui,
+                    "print-color",
+                    f,
+                    "colorHandling",
+                    &[
+                        ("printerManages", tl!("Printer Manages Colors")),
+                        ("photocraftManages", tl!("PhotoCraft Manages Colors")),
+                        ("noColorManagement", tl!("No Color Management")),
+                    ],
+                    240.0,
+                );
+                if s(f, "colorHandling", "") == "photocraftManages" {
+                    // Photoshop's Printer Profile menu: the built-ins, then every installed printer
+                    // (output class) profile by its description.
+                    let installed: Vec<_> = photocraft_engine::installed_profiles::installed()
+                        .into_iter()
+                        .filter(|p| p.is_destination() && p.class == photocraft_cms::ProfileClass::Output)
+                        .collect();
+                    let mut profiles: Vec<(&str, &str)> = vec![
+                        ("coated-cmyk", tl!("Coated CMYK")),
+                        ("srgb", "sRGB IEC61966-2.1"),
+                        ("adobe-rgb-compat", tl!("Adobe RGB (1998) compatible")),
+                        ("display-p3", tl!("Display P3")),
+                        ("gray-gamma-2.2", tl!("Gray Gamma 2.2")),
+                    ];
+                    profiles.extend(installed.iter().map(|p| (p.path.as_str(), p.description.as_str())));
+                    // A remembered profile that is no longer installed still shows, by its file name.
+                    let cur = s(f, "printerProfile", "coated-cmyk");
+                    let stem = std::path::Path::new(&cur).file_stem().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                    if !profiles.iter().any(|(v, _)| *v == cur) {
+                        profiles.push((cur.as_str(), stem.as_str()));
+                    }
+                    dropdown_str(ui, "print-profile", f, "printerProfile", &profiles, 240.0);
+                    ui.horizontal(|ui| {
+                        dropdown_str(
+                            ui,
+                            "print-intent",
+                            f,
+                            "intent",
+                            &[
+                                ("perceptual", tl!("Perceptual")),
+                                ("relative", tl!("Relative Colorimetric")),
+                                ("saturation", tl!("Saturation")),
+                                ("absolute", tl!("Absolute Colorimetric")),
+                            ],
+                            170.0,
+                        );
+                        check(ui, f, "bpc", tl!("Black Point Compensation"), true);
+                    });
+                    if printers.is_some() {
+                        ui.label(
+                            egui::RichText::new(tl!("Remember to turn off the printer's own colour management in Print Settings…")).color(t.warning).size(11.0),
+                        );
+                    }
+                }
+                head(ui, tl!("Position and Size"));
+                dropdown_str(ui, "print-units", f, "units", &[("cm", tl!("Centimeters")), ("mm", tl!("Millimeters")), ("in", tl!("Inches"))], 130.0);
+                let units = s(f, "units", "cm");
+                check(ui, f, "center", tl!("Center"), true);
+                if !b(f, "center", true) {
+                    ui.horizontal(|ui| {
+                        // Kept in inches (Photoshop's Position fields), shown in the chosen units.
+                        for (key, label) in [("top", tl!("Top")), ("left", tl!("Left"))] {
+                            let mut pt = n(f, key, 0.0) * 72.0;
+                            if length_field(ui, label, &mut pt, &units) {
+                                f.insert(key.into(), json!(pt / 72.0));
+                            }
+                        }
                     });
                 }
-                ui.horizontal(|ui| {
-                    let hc = length_field(ui, tl!("Height"), &mut h2, &units);
-                    let wc = length_field(ui, tl!("Width"), &mut w2, &units);
-                    let k = if wc && w > 0.0 {
-                        Some(w2 / w)
-                    } else if hc && h > 0.0 {
-                        Some(h2 / h)
-                    } else {
-                        None
-                    };
-                    if let Some(k) = k.filter(|k| k.is_finite() && *k > 0.0) {
-                        f.insert("scale".into(), json!(((l.scale * k * 100.0) * 100.0).round() / 100.0));
-                        f.insert("scaleToFit".into(), json!(false));
+                check(ui, f, "scaleToFit", tl!("Scale to Fit Media"), false);
+                // Scaled Print Size: Scale, Height and Width move together; Print Resolution follows.
+                if let Ok(l) = photocraft_engine::print_cmds::layout(&doc, &params(f), "file.print") {
+                    let (_, _, w, h) = l.rect;
+                    let (mut w2, mut h2) = (w, h);
+                    let fit = b(f, "scaleToFit", false);
+                    if !fit {
+                        // Two decimals: Height and Width set fractional scales.
+                        ui.horizontal(|ui| {
+                            ui.label(egui::RichText::new(tl!("Scale")).color(t.text_dim));
+                            let mut v = n(f, "scale", 100.0) as f32;
+                            crate::widgets::value_field(ui, &mut v, 1.0..=1000.0, "%", 64.0);
+                            f.insert("scale".into(), json!((f64::from(v) * 100.0).round() / 100.0));
+                        });
                     }
-                });
-                if w > 0.0 {
-                    let ppi = f64::from(doc.size.width) / (w / 72.0);
-                    ui.label(egui::RichText::new(format!("{} {ppi:.0} PPI", tl!("Print Resolution:"))).color(t.text_dim).size(11.0));
+                    ui.horizontal(|ui| {
+                        let hc = length_field(ui, tl!("Height"), &mut h2, &units);
+                        let wc = length_field(ui, tl!("Width"), &mut w2, &units);
+                        let k = if wc && w > 0.0 {
+                            Some(w2 / w)
+                        } else if hc && h > 0.0 {
+                            Some(h2 / h)
+                        } else {
+                            None
+                        };
+                        if let Some(k) = k.filter(|k| k.is_finite() && *k > 0.0) {
+                            f.insert("scale".into(), json!(((l.scale * k * 100.0) * 100.0).round() / 100.0));
+                            f.insert("scaleToFit".into(), json!(false));
+                        }
+                    });
+                    if w > 0.0 {
+                        let ppi = f64::from(doc.size.width) / (w / 72.0);
+                        ui.label(egui::RichText::new(format!("{} {ppi:.0} PPI", tl!("Print Resolution:"))).color(t.text_dim).size(11.0));
+                    }
                 }
-            }
-            head(ui, tl!("Printing Marks"));
-            ui.horizontal(|ui| {
-                check(ui, f, "cornerCropMarks", tl!("Corner Crop Marks"), false);
-                check(ui, f, "centerCropMarks", tl!("Center Crop Marks"), false);
+                head(ui, tl!("Printing Marks"));
+                ui.horizontal(|ui| {
+                    check(ui, f, "cornerCropMarks", tl!("Corner Crop Marks"), false);
+                    check(ui, f, "centerCropMarks", tl!("Center Crop Marks"), false);
+                });
+                ui.horizontal(|ui| {
+                    check(ui, f, "registrationMarks", tl!("Registration Marks"), false);
+                    check(ui, f, "description", tl!("Description"), false);
+                    check(ui, f, "labels", tl!("Labels"), false);
+                });
+                head(ui, tl!("Functions"));
+                check(ui, f, "emulsionDown", tl!("Emulsion Down"), false);
+                if b(f, "emulsionDown", false) && printers.is_some() {
+                    ui.label(
+                        egui::RichText::new(tl!("Don't also tick Mirror Image in Print Settings…: the two flips cancel out.")).color(t.text_dim).size(11.0),
+                    );
+                }
+                #[cfg(network_print)]
+                if network {
+                    head(ui, crate::i18n::t("Network printer"));
+                    let blocked = app.net_print.show(ui, true).block.is_some();
+                    f.insert("__netBlocked".into(), json!(blocked));
+                }
+                if !network {
+                    head(ui, tl!("Save as PDF"));
+                    let mut out = s(f, "output", "");
+                    if ui.add(egui::TextEdit::singleline(&mut out).hint_text(tl!("(print to the printer)")).desired_width(300.0)).changed() {
+                        f.insert("output".into(), json!(out));
+                    }
+                }
             });
-            ui.horizontal(|ui| {
-                check(ui, f, "registrationMarks", tl!("Registration Marks"), false);
-                check(ui, f, "description", tl!("Description"), false);
-                check(ui, f, "labels", tl!("Labels"), false);
-            });
-            head(ui, tl!("Functions"));
-            check(ui, f, "emulsionDown", tl!("Emulsion Down"), false);
-            if b(f, "emulsionDown", false) && printers.is_some() {
-                ui.label(egui::RichText::new(tl!("Don't also tick Mirror Image in Print Settings…: the two flips cancel out.")).color(t.text_dim).size(11.0));
-            }
-            head(ui, tl!("Save as PDF"));
-            let mut out = s(f, "output", "");
-            if ui.add(egui::TextEdit::singleline(&mut out).hint_text(tl!("(print to the printer)")).desired_width(300.0)).changed() {
-                f.insert("output".into(), json!(out));
-            }
         });
     });
 }
 
 fn print_confirm(app: &mut PhotocraftApp, f: &Map<String, Value>) -> Result<Value, String> {
+    #[cfg(network_print)]
+    if app.net_print.selected {
+        return network_confirm(app, f);
+    }
     let r = app.run("file.print", params(f))?;
     if r["pending"] != json!(true) {
         print_status(app, &r);
     }
     Ok(r)
+}
+
+/// Print to the network printer: lay the page out as for the spooler (`prepare_network_print`), then hand it
+/// to the destination's worker, which sends it and follows the job off the UI thread. The dialog closes; how the
+/// print goes is the status row and, when it ends, the status bar, both naming the printer.
+#[cfg(network_print)]
+fn network_confirm(app: &mut PhotocraftApp, f: &Map<String, Value>) -> Result<Value, String> {
+    if photocraft_engine::print_cmds::printing_disabled() {
+        return Err("printing is disabled in this process (PHOTOCRAFT_NO_PRINT)".into());
+    }
+    let doc = app.session.active().ok_or("no document to print")?.doc.clone();
+    let print = photocraft_engine::print_cmds::prepare_network_print(&doc, &params(f)).map_err(|e| e.to_string())?;
+    if !app.net_print.send(print) {
+        return Err(crate::i18n::t("Query the printer and tick the confirmation first.").to_string());
+    }
+    app.ui.status = crate::i18n::t("Sending to the network printer…").to_string();
+    app.ui.status_error = false;
+    Ok(json!({"sent": false, "network": true}))
 }
 
 pub(crate) fn print_status(app: &mut PhotocraftApp, r: &Value) {
