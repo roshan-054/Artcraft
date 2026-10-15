@@ -350,7 +350,10 @@ fn the_print_dialog_sends_the_page_to_a_network_printer() {
         app
     });
     harness.run_steps(4);
+    // An in-process printer list: the system's spooler is never asked.
+    photocraft_engine::print_cmds::use_printer_list(Some(vec![("Front Desk".into(), true)]));
     let id = file_ui::open_print(harness.state_mut());
+    harness.state_mut().ui.dialog_mut(id).unwrap().fields.remove("__printers");
     {
         let app = harness.state_mut();
         app.net_print.selected = true;

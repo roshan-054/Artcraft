@@ -90,7 +90,7 @@ pub(crate) struct NetTasks {
     transport: Option<Transport>,
     pub(crate) state: net::State,
     query: Option<QueryPrinter>,
-    stations: Stations,
+    pub(crate) stations: Stations,
     /// The tracked print of the last job: its status line, buttons and the small status row.
     pub(crate) tracked: Slot,
     /// The destination of the Print dialog is the network printer rather than the system's.
@@ -343,7 +343,7 @@ pub(crate) fn labels() -> Labels<'static> {
         // The three-state wording is plain English (not `tl!`) so the catalogs stay complete; TEST BUILD.
         color: nt!("Colour:"),
         color_color: nt!("Colour"),
-        color_monochrome: nt!("Black and white"),
+        color_monochrome: nt!("Grayscale"),
         resolution: nt!("Resolution:"),
         resolution_dpi: "{dpi} dpi",
         resolution_dpi_xy: "{x} x {y} dpi",
@@ -352,7 +352,7 @@ pub(crate) fn labels() -> Labels<'static> {
         unsupported_sides: nt!("This printer only prints one-sided."),
         unsupported_orientation: nt!("This printer does not take an orientation setting."),
         unsupported_quality: nt!("This printer does not take a quality setting."),
-        unsupported_color: nt!("This printer only prints in black and white."),
+        unsupported_color: nt!("This printer only prints in grayscale."),
         unsupported_resolution: nt!("This printer does not take a resolution setting."),
         unconfirmed_note: nt!("Not confirmed by the printer."),
         confirm: nt!("I confirm sending this document to this printer"),

@@ -7,6 +7,8 @@ use serde_json::{Map, Value, json};
 fn app() -> (PhotocraftApp, u64) {
     let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), photocraft_ui_egui::Services::default());
     app.run("file.new", json!({"width": 120, "height": 80, "name": "Custom paper"})).unwrap();
+    // An in-process printer list: the system's spooler is never asked.
+    photocraft_engine::print_cmds::use_printer_list(Some(vec![("Test native printer".into(), true)]));
     let id = open_print(&mut app);
     // Every UI path in these fixtures is safe even if an unexpected Enter confirms the dialog.
     app.ui.dialog_mut(id).unwrap().fields.insert("dryRun".into(), json!(true));

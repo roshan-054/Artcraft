@@ -758,11 +758,17 @@ pub fn open_print(app: &mut PhotocraftApp) -> u64 {
         f.entry(k.to_string()).or_insert(v);
     }
     // Windows: the system's printers, and the paper from the chosen printer's driver settings.
-    if let Ok(list) = craft_print::rgb::printers() {
-        f.insert("__printers".into(), json!(list.iter().map(|p| p.name.clone()).collect::<Vec<_>>()));
-        let known = |n: &str| list.iter().any(|p| p.name == n);
+    let native = app.session.execute("file.print.printers", json!({})).unwrap_or_default();
+    if native["supported"] == json!(true) {
+        let list: Vec<(String, bool)> = native["printers"]
+            .as_array()
+            .map(|a| a.iter().filter_map(|p| Some((p["name"].as_str()?.to_string(), p["default"].as_bool().unwrap_or(false)))).collect())
+            .unwrap_or_default();
+        f.insert("__printers".into(), json!(list.iter().map(|p| p.0.clone()).collect::<Vec<_>>()));
+        f.insert("__printerDefault".into(), json!(list.iter().find(|p| p.1).map(|p| p.0.clone())));
+        let known = |n: &str| list.iter().any(|p| p.0 == n);
         if !known(&s(&f, "printer", "")) {
-            let fallback = list.iter().find(|p| p.default).or(list.first()).map(|p| p.name.clone()).unwrap_or_default();
+            let fallback = list.iter().find(|p| p.1).or(list.first()).map(|p| p.0.clone()).unwrap_or_default();
             f.insert("printer".into(), json!(fallback));
             f.remove("printerSettings");
         }
@@ -784,6 +790,109 @@ fn to_network(app: &PhotocraftApp) -> bool {
         let _ = app;
         false
     }
+}
+
+/// The Printer menu's value for the network printer, and for the network printer once it was queried.
+const NETWORK_ENTRY: &str = "\u{1}network";
+const NETWORK_KNOWN: &str = "\u{1}network-known";
+
+/// The name a queried network printer reported, when the address now typed has been queried.
+fn queried_network_name(app: &PhotocraftApp) -> Option<String> {
+    #[cfg(network_print)]
+    {
+        app.net_print.state.draft.printer().map(|p| p.name.trim().to_string()).filter(|n| !n.is_empty())
+    }
+    #[cfg(not(network_print))]
+    {
+        let _ = app;
+        None
+    }
+}
+
+/// The Printer menu: the system's printers (the default first and marked), then `Network printer…` and,
+/// once one was queried, that printer by its reported name. `native`: the Windows driver names.
+fn printer_entries(app: &PhotocraftApp, f: &Map<String, Value>, native: Option<&[String]>) -> Vec<(String, String)> {
+    #[allow(unused_mut)]
+    let mut entries = match native {
+        Some(names) => {
+            let default = f.get("__printerDefault").and_then(Value::as_str).unwrap_or_default();
+            let mut e: Vec<(String, String)> =
+                names.iter().map(|n| (n.clone(), if n == default { format!("{n} ({})", tl!("Default printer")) } else { n.clone() })).collect();
+            if let Some(i) = e.iter().position(|(n, _)| n == default) {
+                let d = e.remove(i);
+                e.insert(0, d);
+            }
+            e
+        }
+        None => printer_options(f.get("__systemPrinters"), &s(f, "printer", "")),
+    };
+    #[cfg(network_print)]
+    {
+        entries.push((NETWORK_ENTRY.to_string(), crate::i18n::t("Network printer…").to_string()));
+        if let Some(name) = queried_network_name(app) {
+            entries.push((NETWORK_KNOWN.to_string(), format!("{name} ({})", crate::i18n::t("network"))));
+        }
+    }
+    #[cfg(not(network_print))]
+    let _ = app;
+    entries
+}
+
+/// The Printer menu's current value.
+fn current_printer(app: &PhotocraftApp, f: &Map<String, Value>) -> String {
+    if to_network(app) {
+        return if queried_network_name(app).is_some() { NETWORK_KNOWN } else { NETWORK_ENTRY }.to_string();
+    }
+    s(f, "printer", "")
+}
+
+/// A choice in the Printer menu: a system printer (its driver's paper follows on Windows), or the network printer.
+fn choose_printer(app: &mut PhotocraftApp, f: &mut Map<String, Value>, value: &str, native: bool) {
+    let network = value == NETWORK_ENTRY || value == NETWORK_KNOWN;
+    #[cfg(network_print)]
+    {
+        app.net_print.selected = network;
+    }
+    #[cfg(not(network_print))]
+    let _ = &app;
+    if network {
+        return;
+    }
+    if s(f, "printer", "") != value {
+        f.insert("printer".into(), json!(value));
+        if native {
+            f.remove("printerSettings");
+            driver_page(f);
+        }
+    }
+}
+
+/// Whether the print is Grayscale: the box for a system printer, the Colour setting for the network printer.
+fn effective_grayscale(app: &PhotocraftApp, f: &Map<String, Value>) -> bool {
+    #[cfg(network_print)]
+    if app.net_print.selected {
+        return app.net_print.state.draft.color == Some(craft_ui::printing::network::ColorMode::Monochrome);
+    }
+    let _ = app;
+    b(f, "grayscale", false)
+}
+
+/// The preview texture's cache key: the document, its revision and the gray flag, as separate parts of the id
+/// (a flag folded into a number could land on another entry).
+fn thumb_key(doc: u64, revision: u64, gray: bool) -> egui::Id {
+    egui::Id::new(("print-thumb", doc, revision, gray))
+}
+
+/// RGBA pixels as their Rec. 709 gray (alpha kept): what a Grayscale print puts on the paper.
+fn gray_pixels(rgba: &[u8]) -> Vec<u8> {
+    rgba.as_chunks::<4>()
+        .0
+        .iter()
+        .flat_map(|c| {
+            let g = photocraft_engine::print_cmds::luma709(c[0], c[1], c[2]);
+            [g, g, g, c[3]]
+        })
+        .collect()
 }
 
 /// Whether OK (and Enter) may confirm the Print dialog: not while the network printer's section says
@@ -908,6 +1017,7 @@ fn print_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Va
         f.remove("__driverPageInitialized");
     }
     let p = params(f);
+    let gray = effective_grayscale(app, f);
     ui.horizontal_top(|ui| {
         // Page preview.
         ui.vertical(|ui| {
@@ -927,12 +1037,15 @@ fn print_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Va
                         egui::pos2(page.left() + x as f32 * k, page.bottom() - (y + h) as f32 * k),
                         egui::vec2(w as f32 * k, h as f32 * k),
                     );
-                    let key = egui::Id::new(("print-thumb", doc.id.0, app.session.active().map_or(0, |d| d.revision)));
+                    // Gray and colour thumbnails are cached apart (the flag is part of the key), and a gray
+                    // preview is built gray, so it never shows colour for a frame after the box is ticked.
+                    let key = thumb_key(doc.id.0, app.session.active().map_or(0, |d| d.revision), gray);
                     let tex: Option<Arc<egui::TextureHandle>> = ui.data(|d| d.get_temp(key));
                     let tex = tex.unwrap_or_else(|| {
                         let th = photocraft_compose::thumbnail(&doc, 400);
-                        let ci = egui::ColorImage::from_rgba_unmultiplied([th.width as usize, th.height as usize], &th.pixels);
-                        let tx = Arc::new(ui.ctx().load_texture("print-thumb", ci, egui::TextureOptions::LINEAR));
+                        let pixels = if gray { gray_pixels(&th.pixels) } else { th.pixels.clone() };
+                        let ci = egui::ColorImage::from_rgba_unmultiplied([th.width as usize, th.height as usize], &pixels);
+                        let tx = Arc::new(ui.ctx().load_texture(if gray { "print-thumb-gray" } else { "print-thumb" }, ci, egui::TextureOptions::LINEAR));
                         ui.data_mut(|d| d.insert_temp(key, tx.clone()));
                         tx
                     });
@@ -986,32 +1099,22 @@ fn print_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Va
                     ui.label(egui::RichText::new(s).font(crate::theme::semibold(12.0)).color(t.text));
                 };
                 head(ui, tl!("Printer Setup"));
-                #[cfg(network_print)]
+                // One list: the system's printers, then the network printer (and the one last queried).
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new(crate::i18n::t("Destination")).color(t.text_dim));
-                    let mut destination = if app.net_print.selected { "network" } else { "system" }.to_string();
-                    let choices =
-                        [("system".to_string(), crate::i18n::t("Printer")), ("network".to_string(), crate::i18n::t("Network printer (WS-Print or IPP)"))];
-                    if crate::widgets::dropdown(ui, "print-destination", &mut destination, &choices, 240.0) {
-                        app.net_print.selected = destination == "network";
+                    ui.label(egui::RichText::new(tl!("Printer")).color(t.text_dim));
+                    let entries = printer_entries(app, f, printers.as_deref());
+                    let mut current = current_printer(app, f);
+                    let o: Vec<(String, &str)> = entries.iter().map(|(k, l)| (k.clone(), l.as_str())).collect();
+                    if crate::widgets::dropdown_literal(ui, "print-printer", &mut current, &o, 240.0) {
+                        choose_printer(app, f, &current, printers.is_some());
                     }
                 });
                 if network {
                     // The sheet is laid out here (paper, orientation, position, scale, marks); the printer's own
                     // settings (copies, two-sided, quality, colour, resolution) are the network section below.
                     print_paper_controls(ui, f);
-                } else if let Some(printers) = &printers {
-                    // Windows: Photoshop's Printer menu and Print Settings… (the driver's own dialog).
-                    ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new(tl!("Printer")).color(t.text_dim));
-                        let before = s(f, "printer", "");
-                        let opts: Vec<(&str, &str)> = printers.iter().map(|n| (n.as_str(), n.as_str())).collect();
-                        dropdown_str(ui, "print-printer", f, "printer", &opts, 220.0);
-                        if s(f, "printer", "") != before {
-                            f.remove("printerSettings");
-                            driver_page(f);
-                        }
-                    });
+                } else if printers.is_some() {
+                    // Windows: Photoshop's Print Settings… (the driver's own dialog).
                     ui.horizontal(|ui| {
                         number(ui, f, "copies", tl!("Copies"), 1.0..=999.0, "", 1.0);
                         if ui.button(tl!("Print Settings…")).clicked() {
@@ -1039,17 +1142,17 @@ fn print_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Va
                         ui.label(egui::RichText::new(e).color(t.warning).size(11.0));
                     }
                 } else {
-                    ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new(tl!("Printer")).color(t.text_dim));
-                        let mut pr = s(f, "printer", "");
-                        let opts = printer_options(f.get("__systemPrinters"), &pr);
-                        let o: Vec<(String, &str)> = opts.iter().map(|(k, l)| (k.clone(), l.as_str())).collect();
-                        if crate::widgets::dropdown(ui, "print-printer", &mut pr, &o, 240.0) {
-                            f.insert("printer".into(), json!(pr));
-                        }
-                    });
                     number(ui, f, "copies", tl!("Copies"), 1.0..=999.0, "", 1.0);
                     print_paper_controls(ui, f);
+                    if s(f, "output", "").is_empty() && !b(f, "dryRun", false) {
+                        // Sent to a queue as a PDF at the exact sheet: a queue without the paper is refused
+                        // unless the person allows its own paper for it.
+                        check(ui, f, "paperFallback", crate::i18n::t("Use the printer's own paper if it lacks this one"), false);
+                    }
+                }
+                if !network {
+                    // Gray samples (Rec. 709) in the print and in the preview, besides the driver's monochrome hint.
+                    check(ui, f, "grayscale", tl!("Grayscale"), false);
                 }
                 head(ui, tl!("Color Management"));
                 dropdown_str(
@@ -1214,7 +1317,10 @@ fn network_confirm(app: &mut PhotocraftApp, f: &Map<String, Value>) -> Result<Va
         return Err("printing is disabled in this process (PHOTOCRAFT_NO_PRINT)".into());
     }
     let doc = app.session.active().ok_or("no document to print")?.doc.clone();
-    let print = photocraft_engine::print_cmds::prepare_network_print(&doc, &params(f)).map_err(|e| e.to_string())?;
+    // The Colour setting of the network section is the Grayscale choice: the page itself is made gray.
+    let mut p = params(f);
+    p["grayscale"] = json!(effective_grayscale(app, f));
+    let print = photocraft_engine::print_cmds::prepare_network_print(&doc, &p).map_err(|e| e.to_string())?;
     if !app.net_print.send(print) {
         return Err(crate::i18n::t("Query the printer and tick the confirmation first.").to_string());
     }
@@ -1235,6 +1341,10 @@ pub(crate) fn print_status(app: &mut PhotocraftApp, r: &Value) {
     };
     app.ui.status_error = false;
 }
+
+#[cfg(test)]
+#[path = "file_ui/print_tests.rs"]
+mod print_tests;
 
 #[cfg(test)]
 mod tests {

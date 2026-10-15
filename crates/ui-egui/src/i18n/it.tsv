@@ -4334,7 +4334,6 @@ shape	Appearance	Aspetto
 	A setting isn't valid	Un'impostazione non è valida
 	Accepted by {printer}	Accettato da {printer}
 	Asking the printer…	Interrogazione della stampante…
-	Black and white	Bianco e nero
 	Canceling…	Annullamento…
 	Colour	Colore
 	Colour:	Colore:
@@ -4345,7 +4344,9 @@ shape	Appearance	Aspetto
 	Held by the printer	Trattenuto dalla stampante
 	I confirm sending this document to this printer	Confermo l'invio di questo documento a questa stampante
 	Network printer	Stampante di rete
-	Network printer (WS-Print or IPP)	Stampante di rete (WS-Print o IPP)
+	Network printer…	Stampante di rete…
+	network	rete
+	Use the printer's own paper if it lacks this one	Usa la carta propria della stampante se non ha questa
 	Not confirmed by the printer.	Non confermato dalla stampante.
 	Only IP addresses on this network are accepted (private, link-local or loopback), not host names.	Sono accettati solo indirizzi IP di questa rete (privati, link-local o loopback), non nomi host.
 	Print status	Stato della stampa
@@ -4383,7 +4384,7 @@ shape	Appearance	Aspetto
 	This printer does not take a quality setting.	Questa stampante non supporta un'impostazione di qualità.
 	This printer does not take a resolution setting.	Questa stampante non supporta un'impostazione di risoluzione.
 	This printer does not take an orientation setting.	Questa stampante non supporta un'impostazione di orientamento.
-	This printer only prints in black and white.	Questa stampante stampa solo in bianco e nero.
+	This printer only prints in grayscale.	Questa stampante stampa solo in scala di grigi.
 	This printer only prints one-sided.	Questa stampante stampa solo su un lato.
 	This printer prints one copy at a time.	Questa stampante stampa una copia alla volta.
 	Two-sided:	Fronte/retro:

@@ -4175,7 +4175,6 @@ navigator	Zoom	Zoom
 	A setting isn't valid	Un ajuste no es válido
 	Accepted by {printer}	Aceptado por {printer}
 	Asking the printer…	Consultando la impresora…
-	Black and white	Blanco y negro
 	Canceling…	Cancelando…
 	Colour	Color
 	Colour:	Color:
@@ -4186,7 +4185,9 @@ navigator	Zoom	Zoom
 	Held by the printer	Retenido por la impresora
 	I confirm sending this document to this printer	Confirmo el envío de este documento a esta impresora
 	Network printer	Impresora de red
-	Network printer (WS-Print or IPP)	Impresora de red (WS-Print o IPP)
+	Network printer…	Impresora de red…
+	network	red
+	Use the printer's own paper if it lacks this one	Usar el papel propio de la impresora si no tiene este
 	Not confirmed by the printer.	No confirmado por la impresora.
 	Only IP addresses on this network are accepted (private, link-local or loopback), not host names.	Solo se aceptan direcciones IP de esta red (privadas, de enlace local o de bucle), no nombres de host.
 	Print status	Estado de impresión
@@ -4224,7 +4225,7 @@ navigator	Zoom	Zoom
 	This printer does not take a quality setting.	Esta impresora no admite un ajuste de calidad.
 	This printer does not take a resolution setting.	Esta impresora no admite un ajuste de resolución.
 	This printer does not take an orientation setting.	Esta impresora no admite un ajuste de orientación.
-	This printer only prints in black and white.	Esta impresora solo imprime en blanco y negro.
+	This printer only prints in grayscale.	Esta impresora solo imprime en escala de grises.
 	This printer only prints one-sided.	Esta impresora solo imprime por una cara.
 	This printer prints one copy at a time.	Esta impresora imprime una copia cada vez.
 	Two-sided:	A doble cara:
