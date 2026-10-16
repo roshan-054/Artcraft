@@ -105,12 +105,17 @@ fn reports_write_progress() {
     assert_no_temp(&d.0);
 }
 
+/// #6606: a save into a folder that doesn't exist fails instead of creating the folder tree,
+/// so a typo in a scripted path can't scatter folders.
 #[test]
-fn creates_missing_parent_folders() {
+fn missing_parent_folder_is_an_error_and_creates_nothing() {
     let d = TempDir::new("parent");
     let p = d.0.join("a/b/out.png");
-    atomic_write(&p, b"x").unwrap();
-    assert_eq!(std::fs::read(&p).unwrap(), b"x");
+    let e = atomic_write(&p, b"x").unwrap_err();
+    assert_eq!(e.kind(), io::ErrorKind::NotFound);
+    assert!(e.to_string().contains("does not exist"), "{e}");
+    assert!(!d.0.join("a").exists(), "no folder tree is created");
+    assert_no_temp(&d.0);
 }
 
 #[test]

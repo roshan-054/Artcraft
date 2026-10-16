@@ -13,6 +13,10 @@
 //!   if it does anyway, the save fails with a clear error. It never falls back to writing the
 //!   destination in place.
 //! - **Unwritable folder:** the save fails with a clear error instead of writing in place.
+//! - **Missing folder:** the save fails with a clear error; it never creates the folder tree, so
+//!   a typo in a scripted or batch path can't scatter folders beside the user's files (#6606).
+//!   Callers that intentionally produce output trees (batch export, Image Assets, packages)
+//!   create their directories explicitly.
 //! - **Network shares (macOS):** `sync_all` asks for a full flush to the disk's platters
 //!   (`F_FULLFSYNC`), which SMB shares and some virtual file systems refuse while a plain `fsync`
 //!   works. [`sync_file`] falls back to the plain one there (#1336).
@@ -168,7 +172,9 @@ pub fn atomic_write_with_progress(fs: &dyn AtomicFs, retry: RenameRetry, path: &
         Some(d) if !d.as_os_str().is_empty() => d.to_path_buf(),
         _ => PathBuf::from("."),
     };
-    std::fs::create_dir_all(&dir).map_err(|e| context(e, format!("cannot create the folder {}", dir.display())))?;
+    if !dir.exists() {
+        return Err(io::Error::new(io::ErrorKind::NotFound, format!("cannot save {}: the folder {} does not exist; create it first", path.display(), dir.display())));
+    }
 
     // Create a fresh temporary file next to the target (same directory, so the rename never
     // crosses a device). The name is unique per process and call; retry a few on collisions.
@@ -244,10 +250,6 @@ pub fn temp_name(file: &str) -> String {
     // Keep the name short: a long file name plus the suffix must stay under NAME_MAX.
     let stem: String = file.chars().take(64).collect();
     format!(".{stem}.{}-{n}.pcsave.tmp", std::process::id())
-}
-
-fn context(e: io::Error, msg: String) -> io::Error {
-    io::Error::new(e.kind(), format!("{msg}: {e}"))
 }
 
 const UNCHANGED: &str = "the original file was not changed";

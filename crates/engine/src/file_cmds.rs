@@ -1056,6 +1056,11 @@ fn process_outputs<'a>(outputs: impl IntoIterator<Item = (&'a str, String)>, sav
     for (path, out) in outputs {
         let r = (|| -> Result<()> {
             written.check(&out).map_err(EngineError::Other)?;
+            // Batch output: each input's relative folder under `output` is created on purpose
+            // (#6606 keeps atomic_write from creating the tree of a plain save).
+            if let Some(parent) = std::path::Path::new(&out).parent().filter(|p| !p.as_os_str().is_empty()) {
+                std::fs::create_dir_all(parent).map_err(|e| EngineError::Other(format!("mkdir `{}`: {e}", parent.display())))?;
+            }
             let bytes = read_file(path)?;
             let mut scratch = Session::new();
             let doc = import(&file_name(path), &bytes)?;
@@ -1322,6 +1327,8 @@ fn flatten_all_masks(s: &mut Session) -> Result<Value> {
 fn layers_to_files(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "file.export.layersToFiles";
     let dir = str_param(p, "dir", cmd).or_else(|_| str_param(p, "output", cmd))?.to_string();
+    // Batch output: the destination tree is created on purpose (#6606 keeps atomic_write from doing it).
+    std::fs::create_dir_all(&dir).map_err(|e| EngineError::Other(format!("mkdir `{dir}`: {e}")))?;
     let names = export_layers_with(s, p, |name, bytes| write_file(&join(&dir, name), bytes))?;
     let files: Vec<String> = names.iter().map(|name| join(&dir, name)).collect();
     Ok(json!({"files": files}))
