@@ -5320,6 +5320,12 @@ pub fn tool_event(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifiers)
         ToolEvent::Move { x, y, .. } => {
             if let Some(d) = app.guide_drag.as_mut().filter(|d| d.index.is_some()) {
                 d.pos = if d.vertical { x } else { y };
+                d.drop = Some([x, y]);
+                d.on_ruler = app.ui.extras.rulers
+                    && crate::canvas::ViewXform::active(app).is_some_and(|xf| {
+                        let p = xf.to_screen(x, y);
+                        p.x < xf.rect.left() || p.y < xf.rect.top()
+                    });
                 return;
             }
         }
@@ -5327,6 +5333,12 @@ pub fn tool_event(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifiers)
             if let Some(mut d) = app.guide_drag.filter(|d| d.index.is_some()) {
                 app.guide_drag = None;
                 d.pos = if d.vertical { x } else { y };
+                d.drop = Some([x, y]);
+                d.on_ruler = app.ui.extras.rulers
+                    && crate::canvas::ViewXform::active(app).is_some_and(|xf| {
+                        let p = xf.to_screen(x, y);
+                        p.x < xf.rect.left() || p.y < xf.rect.top()
+                    });
                 crate::rulers::finish_drag(app, d);
                 return;
             }

@@ -96,13 +96,17 @@ pub struct GuideDrag {
     /// Where the pointer went down, on the guide's axis: released there, an existing guide is
     /// clicked (selected), not moved.
     pub press: f64,
+    /// Full document point [x, y] where the pointer is released, if known.
+    pub drop: Option<[f64; 2]>,
+    /// Whether the pointer was over a ruler (top, left, or corner) when released.
+    pub on_ruler: bool,
 }
 
 impl GuideDrag {
     /// An existing guide taken at document point `p`.
     pub fn existing(vertical: bool, index: usize, p: [f64; 2]) -> Self {
         let at = if vertical { p[0] } else { p[1] };
-        Self { vertical, index: Some(index), pos: at, press: at }
+        Self { vertical, index: Some(index), pos: at, press: at, drop: Some(p), on_ruler: false }
     }
 }
 
@@ -206,7 +210,9 @@ pub fn draw_guides(app: &PhotocraftApp, painter: &egui::Painter, xf: &ViewXform,
             }
         }
     }
-    if let Some(d) = drag {
+    if let Some(d) = drag
+        && !d.on_ruler
+    {
         // A guide being moved shows its own colour; a new one dragged from a ruler the preference's.
         let list = if d.vertical { &doc.guides.vertical } else { &doc.guides.horizontal };
         line(d.vertical, d.pos, d.index.and_then(|i| list.get(i)).map_or(guide, |p| own(d.vertical, *p)));
@@ -235,9 +241,9 @@ pub fn guide_at(app: &PhotocraftApp, x: f64, y: f64) -> Option<(bool, usize)> {
     None
 }
 
-/// Finish a guide drag: create, move, or delete (dropped outside the canvas). An existing guide
-/// released where it was pressed is a click: it's selected and stays put, as in Photoshop; a
-/// moved one stays selected.
+/// Finish a guide drag: create, move, or delete (dropped on either ruler or outside the canvas).
+/// An existing guide released where it was pressed is a click: it's selected and stays put,
+/// as in Photoshop; a moved one stays selected.
 pub fn finish_drag(app: &mut PhotocraftApp, d: GuideDrag) {
     let Some(size) = app.session.active().map(|s| s.doc.size) else { return };
     if let Some(i) = d.index
@@ -248,7 +254,19 @@ pub fn finish_drag(app: &mut PhotocraftApp, d: GuideDrag) {
     }
     let extent = if d.vertical { size.width } else { size.height } as f64;
     let orientation = if d.vertical { "vertical" } else { "horizontal" };
-    let inside = d.pos >= 0.0 && d.pos <= extent;
+    // Dropping onto either ruler removes the guide (#6286, #5034).
+    let on_ruler = d.on_ruler
+        || (app.ui.extras.rulers
+            && d.drop.is_some_and(|pt| {
+                let Some(xf) = crate::canvas::ViewXform::active(app) else { return false };
+                let p = xf.to_screen(pt[0], pt[1]);
+                p.x < xf.rect.left() || p.y < xf.rect.top()
+            }));
+    let inside = !on_ruler
+        && match d.drop {
+            Some([x, y]) => x >= 0.0 && x <= size.width as f64 && y >= 0.0 && y <= size.height as f64,
+            None => d.pos >= 0.0 && d.pos <= extent,
+        };
     let pos = (d.pos * 1000.0).round() / 1000.0;
     let _ = match (d.index, inside) {
         (None, true) => app.run("view.newGuide", json!({"orientation": orientation, "position": pos})),
@@ -437,11 +455,19 @@ pub fn draw_rulers(app: &mut PhotocraftApp, ui: &mut egui::Ui, full: Rect, xf: &
             let d = xf.to_doc(pos);
             let along = if vertical { d[0] } else { d[1] };
             let pos = if ui.input(|i| i.modifiers.shift) { snap_to_tick(app, xf, vertical, along) } else { crate::snap_ui::snap_guide(app, vertical, along) };
-            app.guide_drag = Some(GuideDrag { vertical, index: None, pos, press: pos });
+            let on_ruler = top.contains(pos) || left.contains(pos) || corner.contains(pos);
+            app.guide_drag = Some(GuideDrag { vertical, index: None, pos, press: pos, drop: Some(d), on_ruler });
         }
         if resp.drag_stopped()
-            && let Some(d) = app.guide_drag.take()
+            && let Some(mut d) = app.guide_drag.take()
         {
+            if let Some(pos) = resp.interact_pointer_pos().or_else(|| ui.input(|i| i.pointer.latest_pos())) {
+                let doc = xf.to_doc(pos);
+                let along = if d.vertical { doc[0] } else { doc[1] };
+                d.pos = if ui.input(|i| i.modifiers.shift) { snap_to_tick(app, xf, d.vertical, along) } else { crate::snap_ui::snap_guide(app, d.vertical, along) };
+                d.drop = Some(doc);
+                d.on_ruler = top.contains(pos) || left.contains(pos) || corner.contains(pos);
+            }
             finish_drag(app, d);
         }
         resp.context_menu(|ui| {
@@ -675,13 +701,13 @@ mod tests {
         let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
         app.run("file.new", json!({"width": 200, "height": 100})).unwrap();
         app.hover_doc = None;
-        app.guide_drag = Some(GuideDrag { vertical: true, index: None, pos: 42.0, press: 42.0 });
+        app.guide_drag = Some(GuideDrag { vertical: true, index: None, pos: 42.0, press: 42.0, drop: None, on_ruler: false });
         let mut h = egui_kittest::Harness::builder()
             .with_size(vec2(260.0, 240.0))
             .build_ui_state(|ui, app| crate::panels::dock_body(app, ui, crate::dock::Group::Navigator, 2), app);
         h.run_steps(2);
         assert!(h.query_by_label("42").is_some(), "vertical guide: X readout");
-        h.state_mut().guide_drag = Some(GuideDrag { vertical: false, index: None, pos: 17.0, press: 17.0 });
+        h.state_mut().guide_drag = Some(GuideDrag { vertical: false, index: None, pos: 17.0, press: 17.0, drop: None, on_ruler: false });
         h.run_steps(2);
         assert!(h.query_by_label("17").is_some(), "horizontal guide: Y readout");
     }
@@ -810,15 +836,34 @@ mod tests {
         let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
         app.session.execute("file.new", json!({"width": 200, "height": 100})).unwrap();
         app.sync_views();
-        finish_drag(&mut app, GuideDrag { vertical: true, index: None, pos: 50.0, press: 50.0 });
-        finish_drag(&mut app, GuideDrag { vertical: false, index: None, pos: 500.0, press: 500.0 }); // off canvas: ignored
+        finish_drag(&mut app, GuideDrag { vertical: true, index: None, pos: 50.0, press: 50.0, drop: None, on_ruler: false });
+        finish_drag(&mut app, GuideDrag { vertical: false, index: None, pos: 500.0, press: 500.0, drop: None, on_ruler: false }); // off canvas: ignored
         assert_eq!(app.session.active().unwrap().doc.guides.vertical, vec![50.0]);
         assert!(app.session.active().unwrap().doc.guides.horizontal.is_empty());
         assert_eq!(guide_at(&app, 51.0, 10.0), Some((true, 0)));
-        finish_drag(&mut app, GuideDrag { vertical: true, index: Some(0), pos: 120.0, press: 50.0 });
+        finish_drag(&mut app, GuideDrag { vertical: true, index: Some(0), pos: 120.0, press: 50.0, drop: None, on_ruler: false });
         assert_eq!(app.session.active().unwrap().doc.guides.vertical, vec![120.0]);
-        finish_drag(&mut app, GuideDrag { vertical: true, index: Some(0), pos: -30.0, press: 120.0 });
-        assert!(app.session.active().unwrap().doc.guides.vertical.is_empty());
+        // #6286, #5034: Dropped on a ruler (or off canvas) removes the guide.
+        finish_drag(&mut app, GuideDrag { vertical: true, index: Some(0), pos: 120.0, press: 120.0, drop: Some([120.0, 50.0]), on_ruler: true });
+        assert!(app.session.active().unwrap().doc.guides.vertical.is_empty(), "dropped on ruler: deleted");
+
+        // Horizontal guide: move within canvas vs drop on either ruler or outside.
+        finish_drag(&mut app, GuideDrag { vertical: false, index: None, pos: 30.0, press: 30.0, drop: Some([50.0, 30.0]), on_ruler: false });
+        assert_eq!(app.session.active().unwrap().doc.guides.horizontal, vec![30.0]);
+        // Move within canvas:
+        finish_drag(&mut app, GuideDrag { vertical: false, index: Some(0), pos: 70.0, press: 30.0, drop: Some([150.0, 70.0]), on_ruler: false });
+        assert_eq!(app.session.active().unwrap().doc.guides.horizontal, vec![70.0]);
+        // Drag horizontal guide to the left ruler (x < 0): deleted!
+        finish_drag(&mut app, GuideDrag { vertical: false, index: Some(0), pos: 70.0, press: 70.0, drop: Some([-20.0, 70.0]), on_ruler: false });
+        assert!(app.session.active().unwrap().doc.guides.horizontal.is_empty(), "horizontal guide dragged to left ruler: deleted");
+
+        // Off-canvas in 2D (past right or bottom):
+        finish_drag(&mut app, GuideDrag { vertical: true, index: None, pos: 50.0, press: 50.0, drop: Some([50.0, 50.0]), on_ruler: false });
+        assert_eq!(app.session.active().unwrap().doc.guides.vertical, vec![50.0]);
+        finish_drag(&mut app, GuideDrag { vertical: true, index: Some(0), pos: 50.0, press: 50.0, drop: Some([50.0, 150.0]), on_ruler: false });
+        assert!(app.session.active().unwrap().doc.guides.vertical.is_empty(), "vertical guide dragged below canvas: deleted");
+
+        finish_drag(&mut app, GuideDrag { vertical: true, index: Some(0), pos: -30.0, press: 120.0, drop: None, on_ruler: false });
         app.ui.extras.lock_guides = true;
         assert_eq!(guide_at(&app, 0.0, 0.0), None);
     }
@@ -999,6 +1044,38 @@ mod tests {
         assert_eq!(drag(left, egui::Modifiers::NONE), (vec![37.0], vec![]), "left ruler: vertical");
         assert_eq!(drag(top, egui::Modifiers::ALT), (vec![37.0], vec![]), "Alt from the top ruler: vertical");
         assert_eq!(drag(left, egui::Modifiers::ALT), (vec![], vec![90.0]), "Alt from the left ruler: horizontal");
+    }
+
+    /// #6286, #5034: dragging a guide onto either ruler (the top ruler or the left ruler)
+    /// cancels creating it or removes an existing one.
+    #[test]
+    fn dragging_a_guide_onto_either_ruler_cancels_it() {
+        let full = Rect::from_min_size(Pos2::ZERO, vec2(400.0, 300.0));
+        let rect = Rect::from_min_max(full.min + vec2(RULER, RULER), full.max);
+        let xf = ViewXform { rect, zoom: 1.0, center: [128.0, 64.0], flip: false, rotation: 0.0, aspect: 1.0 };
+        let drag_between = |from: Pos2, to: Pos2| {
+            let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+            app.run("file.new", json!({"width": 256, "height": 128})).unwrap();
+            let mut h = egui_kittest::Harness::builder().with_size(vec2(400.0, 300.0)).build_ui_state(move |ui, app| draw_rulers(app, ui, full, &xf), app);
+            h.event_modifiers(egui::Event::PointerMoved(from), egui::Modifiers::NONE);
+            h.event_modifiers(egui::Event::PointerButton { pos: from, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE }, egui::Modifiers::NONE);
+            h.run_steps(1);
+            h.event_modifiers(egui::Event::PointerMoved(to), egui::Modifiers::NONE);
+            h.run_steps(1);
+            h.event_modifiers(egui::Event::PointerButton { pos: to, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE }, egui::Modifiers::NONE);
+            h.run_steps(2);
+            let g = &h.state().session.active().unwrap().doc.guides;
+            (g.vertical.clone(), g.horizontal.clone())
+        };
+        let (top, left) = (pos2(200.0, RULER / 2.0), pos2(RULER / 2.0, 150.0));
+        // Drag from top ruler onto left ruler: cancelled, no guide created.
+        assert_eq!(drag_between(top, left), (vec![], vec![]), "top ruler to left ruler cancels guide");
+        // Drag from left ruler onto top ruler: cancelled, no guide created.
+        assert_eq!(drag_between(left, top), (vec![], vec![]), "left ruler to top ruler cancels guide");
+        // Drag from top ruler back onto top ruler: cancelled, no guide created.
+        assert_eq!(drag_between(top, top), (vec![], vec![]), "top ruler back onto top ruler cancels guide");
+        // Drag from left ruler back onto left ruler: cancelled, no guide created.
+        assert_eq!(drag_between(left, left), (vec![], vec![]), "left ruler back onto left ruler cancels guide");
     }
 
     /// #3770: a guide Shift-dragged out of a ruler lands on the nearest tick the ruler draws
