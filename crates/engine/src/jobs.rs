@@ -219,6 +219,7 @@ struct Running {
     started_ms: f64,
     coalesce: Option<String>,
     color_restrict: Option<usize>,
+    isolated_transform: bool,
     rx: std::sync::mpsc::Receiver<Result<Payload>>,
     apply: Option<Apply>,
     #[cfg(not(target_arch = "wasm32"))]
@@ -376,6 +377,7 @@ pub fn run<T: Send + 'static>(
         started_ms: now_ms(),
         coalesce: s.coalesce_request.clone(),
         color_restrict: s.color_restrict,
+        isolated_transform: false,
         rx,
         apply: Some(erased),
         #[cfg(not(target_arch = "wasm32"))]
@@ -653,6 +655,10 @@ impl Session {
         self.active().and_then(|st| self.job_on(st.doc.id))
     }
 
+    pub(crate) fn channel_transform_running(&self) -> bool {
+        self.active().is_some_and(|st| self.jobs.running.iter().any(|job| job.doc == Some(st.doc.id) && job.isolated_transform))
+    }
+
     /// Wait for background workers of cancelled jobs to exit (tests and benchmarks measure
     /// cancel latency with it). Native only; returns at once on wasm.
     pub fn join_cancelled_jobs(&mut self) {
@@ -664,7 +670,10 @@ impl Session {
 
     /// Why command `id` can't run now because of a background job (None = no conflict).
     pub(crate) fn job_conflict(&self, id: &str, journal: bool) -> Option<String> {
-        if !journal || independent_of_document(id) {
+        if !journal
+            || independent_of_document(id)
+            || (self.channel_transform_running() && matches!(id, "channel.setVisible" | "view.layerMask" | "layer.toggleMaskOverlay"))
+        {
             return None;
         }
         let job = self.active_job()?;
@@ -692,6 +701,9 @@ impl Session {
         // effect.
         if let Some(gate) = self.authorize {
             gate(id, &params)?;
+        }
+        if let Some(reason) = crate::channel_transform::refusal(self, id, &params, spec.journal) {
+            return Err(EngineError::Disabled(id.into(), reason.into()));
         }
         let _authorization = AuthorizationScope::enter(self.authorize);
         // Last Filter runs as the filter it repeats: journaled, recorded in an action, faded and
@@ -743,6 +755,7 @@ impl Session {
             (Err(e), None) => Err(e),
             (Ok(_), Some(mut job)) => {
                 job.command = id.to_string();
+                job.isolated_transform = crate::channel_transform::geometric(id) && run_params.get("target").is_some_and(|t| t != "pixels");
                 job.params = params;
                 job.journal = spec.journal;
                 let jid = job.id;
