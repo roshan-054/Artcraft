@@ -246,7 +246,7 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
             if web {
                 ui.set_max_width(available.x);
                 ui.set_min_size(available);
-            } else if let Some(w) = crate::file_ui::dialog_width(&d.fields) {
+            } else if let Some(w) = crate::file_ui::dialog_width(&d.fields).or_else(|| crate::cloud_dialog::width(&d.fields)) {
                 ui.set_min_width(w);
                 ui.set_max_width(w);
             }
@@ -314,6 +314,7 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
                 DialogKind::Command if crate::brush_preset_dialog::owns(&fields) => {
                     outcome = crate::brush_preset_dialog::body(app, ui, &mut fields, interactive)
                 }
+                DialogKind::Command if crate::cloud_dialog::owns(&fields) => outcome = crate::cloud_dialog::body(app, ui, &fields),
                 DialogKind::Command if crate::fill_ui::owns(&fields) => crate::fill_ui::body(app, ui, &mut fields),
                 DialogKind::Command if crate::pattern_fill_ui::owns(&fields) => crate::pattern_fill_ui::body(app, ui, &mut fields),
                 DialogKind::Command if crate::stroke_ui::owns(&fields) => crate::stroke_ui::body(ui, &mut fields),
@@ -373,7 +374,7 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
                 }
             }
             crate::field_tab::end(ui.ctx(), tab);
-            if crate::guide_layout_ui::owns(&fields) || crate::brush_preset_dialog::owns(&fields) {
+            if crate::guide_layout_ui::owns(&fields) || crate::brush_preset_dialog::owns(&fields) || crate::cloud_dialog::owns(&fields) {
                 // These dialogs own their right-side actions and validate Enter themselves.
             } else if crate::color_picker_ui::owns(&fields) {
                 if interactive && outcome.is_none() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
@@ -607,6 +608,7 @@ pub fn confirm(app: &mut PhotocraftApp, id: u64) -> Result<Value, String> {
         }
         DialogKind::Command if crate::guide_layout_ui::owns(&d.fields) => crate::guide_layout_ui::confirm(app, &d.fields),
         DialogKind::Command if crate::brush_preset_dialog::owns(&d.fields) => crate::brush_preset_dialog::confirm(app, &d.fields),
+        DialogKind::Command if crate::cloud_dialog::owns(&d.fields) => crate::cloud_dialog::confirm(),
         DialogKind::Command if crate::fill_ui::owns(&d.fields) => crate::fill_ui::confirm(app, &d.fields),
         DialogKind::Command if crate::pattern_fill_ui::owns(&d.fields) => crate::pattern_fill_ui::confirm(app, &d.fields),
         DialogKind::Command if crate::stroke_ui::owns(&d.fields) => crate::stroke_ui::confirm(app, &d.fields),

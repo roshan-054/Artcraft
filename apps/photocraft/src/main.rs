@@ -37,6 +37,7 @@ mod appearance;
 mod apple_events;
 mod caps_lock;
 mod caption_style;
+mod cloud;
 mod control_server;
 mod crash_guard;
 mod cursor;
@@ -616,6 +617,14 @@ fn main() -> eframe::Result {
             // precise crosshair for painting tools while it is toggled on (#1758).
             app.services.caps_lock = caps_lock::service(cc);
             app.services.screen_pick = screen_color::service(cc, app.services.is_wayland);
+            // Cloud storage through CollabCraft, when `PHOTOCRAFT_CLOUD_URL` (or `CRAFT_CLOUD_URL`
+            // / `COLLABCRAFT_URL`) names a service. With none there is no worker and the interface
+            // offers nothing cloud-shaped. The share dialog gets a client of its own so a large
+            // save never queues behind one of its requests.
+            if let Some(backend) = cloud::service(cc.egui_ctx.clone()) {
+                app.cloud.connect(backend);
+                app.share.connect(collabcraft_share::CollabCraft::from_fn(cloud::client).for_app("photocraft"));
+            }
             // Tablet pressure/tilt/eraser (winit drops them): the macOS monitor and the X11 reader
             // write into the stylus feed. The monitor goes in here, not before the event loop:
             // AppKit's shared application only exists once winit created it (#759).

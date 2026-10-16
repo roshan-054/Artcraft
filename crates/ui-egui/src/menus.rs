@@ -155,6 +155,11 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
     if let Some(r) = crate::prefs_ui::invoke(app, ctx, id, &params) {
         return r;
     }
+    // Open from the Cloud, Save to the Cloud, and File › Save for a document that came from the
+    // cloud (it writes back there, not to a file on this computer).
+    if let Some(r) = crate::cloud::menu(app, id, &params) {
+        return r;
+    }
     // Save for Web, Print and the other File-menu dialogs added with slices.
     if let Some(r) = crate::file_ui::invoke(app, ctx, id, &params) {
         return r;
@@ -674,6 +679,9 @@ pub fn is_enabled(app: &PhotocraftApp, id: &str) -> bool {
     if let Some(e) = crate::view_cmds::is_enabled(app, id) {
         return e;
     }
+    if let Some(e) = crate::cloud::is_enabled(app, id) {
+        return e;
+    }
     if let Some(e) = crate::plugin_ui::is_enabled(app, id) {
         return e;
     }
@@ -884,6 +892,7 @@ pub fn is_live(id: &str) -> bool {
         || id == "view.proofSetup.custom"
         || crate::view_cmds::handles(id)
         || crate::analysis_ui::handles(id)
+        || crate::cloud::handles(id)
         || crate::workspace_ui::handles(id)
         || crate::preset_panels::handles(id)
         || crate::type_panels_ui::handles(id)
@@ -1017,6 +1026,25 @@ pub fn menu_items(app: &PhotocraftApp) -> Vec<MenuItem> {
         });
         for (k, it) in recent.into_iter().enumerate() {
             items.insert(after + 1 + k, it);
+        }
+    }
+    // File › Open from the Cloud… and Save to the Cloud…, beside Open… and Save As…. A build with
+    // no cloud service configured offers nothing cloud-shaped at all: an item greyed out for ever
+    // would be a promise the application cannot keep.
+    if crate::cloud::available(app) {
+        for (id, label, after) in [("cloud.open", "Open from the Cloud…", "file.open"), ("cloud.saveAs", "Save to the Cloud…", "file.saveAs")] {
+            if let Some(at) = items.iter().position(|i| i.id == after) {
+                let item = MenuItem {
+                    id: id.into(),
+                    label: label.into(),
+                    path: vec!["File".into()],
+                    shortcut: None,
+                    enabled: is_enabled(app, id),
+                    checked: None,
+                    color: None,
+                };
+                items.insert(at + 1, item);
+            }
         }
     }
     // Help: the link items, a separator, then System Info and About.

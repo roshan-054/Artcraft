@@ -34,6 +34,24 @@ pub fn paint(ui: &egui::Ui, rect: Rect, name: &str, size: f32, tint: Color32) {
     image(name, size, tint).paint_at(ui, r);
 }
 
+/// Paint icon `name` into `rect` with a painter alone, for a control that hands over no `Ui`
+/// (the cloud file lists).
+///
+/// [`paint`] needs one because `egui::Image::paint_at` does. The texture is resolved from the
+/// painter's own context instead, and the icon is drawn as the rectangle it fills. An SVG the
+/// loader has not rasterized yet draws nothing this frame, which is what [`paint`] does too.
+pub fn paint_with(painter: &egui::Painter, name: &str, rect: Rect, tint: Color32) {
+    use egui::emath::GuiRounding as _;
+    let scale = painter.ctx().pixels_per_point();
+    let rect = rect.round_to_pixels(scale);
+    // Exactly the pixels the rectangle covers, so an SVG comes out crisp.
+    let pixels = (scale * rect.size()).round();
+    let hint = egui::SizeHint::Size { width: pixels.x as u32, height: pixels.y as u32, maintain_aspect_ratio: false };
+    let loaded = white_icons().source(name).load(painter.ctx(), egui::TextureOptions::default(), hint);
+    let Ok(egui::load::TexturePoll::Ready { texture }) = loaded else { return };
+    egui::paint_texture_at(painter, rect, &egui::ImageOptions { tint, ..Default::default() }, &texture);
+}
+
 /// An icon as the pointer, above every window: `name` with its hotspot `hot` (a fraction of the
 /// icon box) on `p`, white with a dark outline so it reads on any image. The caller hides the OS
 /// cursor (`CursorIcon::None`).

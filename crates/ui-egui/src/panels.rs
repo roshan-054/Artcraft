@@ -641,6 +641,11 @@ pub fn title_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                 let controls_end = {
                     let ui = &mut group_ui;
                     ui.spacing_mut().item_spacing.x = 6.0;
+                    // Who is signed in, who else is in this document, and Share, at the far end
+                    // where every office suite puts them. Drawn before the rest because this
+                    // layout runs from the far end inward, and what they take is subtracted from
+                    // the room the rest divides up. A build with no cloud service draws none of it.
+                    crate::cloud::title_controls(app, ui);
                     let mut ws = app.ui.workspace.clone();
                     let opts = [
                         // Keys stay English (`apply_workspace` matches them); the dropdown

@@ -2734,7 +2734,11 @@ fn start_screen(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let recent: Vec<String> =
         if cfg!(target_arch = "wasm32") || !show_recent { Vec::new() } else { app.ui.recent_files.iter().take(HOME_RECENT).cloned().collect() };
     let recent_h = if recent.is_empty() { 0.0 } else { 34.0 + recent.len() as f32 * HOME_RECENT_ROW };
-    let card = Rect::from_center_size(area.center(), egui::vec2(460.0, 330.0 + recent_h));
+    // The Cloud section is two lists side by side, so a build with a service wants a wider and
+    // taller card. One without keeps the card it always had.
+    let cloud = crate::cloud::available(app);
+    let (card_w, cloud_h) = if cloud { (640.0, 360.0) } else { (460.0, 0.0) };
+    let card = Rect::from_center_size(area.center(), egui::vec2(card_w, 330.0 + recent_h + cloud_h));
     let new_label = crate::shortcuts::command_label(app, "New document…", "file.new");
     let open_label = crate::shortcuts::command_label(app, "Open…", "file.open");
     ui.scope_builder(egui::UiBuilder::new().max_rect(card), |ui| {
@@ -2775,6 +2779,10 @@ fn start_screen(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             if !recent.is_empty() {
                 ui.add_space(22.0);
                 home_recent(app, ui, &recent);
+            }
+            if cloud {
+                ui.add_space(22.0);
+                crate::cloud::home_section(app, ui);
             }
             ui.add_space(26.0);
             crate::links::discord_button(app, ui, 190.0);

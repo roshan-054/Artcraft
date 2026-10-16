@@ -4,6 +4,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
+use craft_cloud::{Entry, EntryKind};
 use photocraft_codecs::{ChannelLayout, EncodeOptions, Image};
 use photocraft_doc::Document;
 use photocraft_ui_egui::i18n;
@@ -61,6 +62,14 @@ pub fn start() {
         {
             create.instance_descriptor.backends = eframe::wgpu::Backends::GL;
         }
+        let mut invite = match craft_cloud_client::invite::arrive().await {
+            craft_cloud_client::invite::Arrival::Ordinary => None,
+            craft_cloud_client::invite::Arrival::Refused(reason) => {
+                craft_cloud_client::invite::refuse(&reason);
+                return;
+            }
+            craft_cloud_client::invite::Arrival::Invited(invitation) => Some(invitation),
+        };
         // Hydrate before constructing an interactive session: a late load must never undo a
         // user deletion/reorder. Storage denial or timeout still opens a usable session.
         let (database, presets, mut preset_warnings) = match crate::indexed_presets::load().await {
@@ -95,9 +104,22 @@ pub fn start() {
                         log::info!("photocraft-web: wgpu backend {:?}", rs.adapter.get_info().backend);
                         app.set_wgpu(rs);
                     }
+                    // Cloud storage through CollabCraft. The browser build uses the same-origin
+                    // cookie the service set at sign-in; no device flow, no token file.
+                    app.cloud.connect(crate::cloud::Service::new(cc.egui_ctx.clone()));
+                    if let Some(share) = collabcraft_share::CollabCraft::from_env() {
+                        app.share.connect(share.for_app("photocraft"));
+                    }
+                    photocraft_ui_egui::cloud::start(&mut app);
+                    let pending_file = if invite.is_some() { None } else { query_param("file") };
+                    if let Some(invitation) = invite.take() {
+                        open_invite(&mut app, invitation);
+                    }
+                    // `?file=<id>` is the deep link CollabCraft passes when opening a document from
+                    // a cloud file list (the provider's own handle, opaque here).
                     let unsaved = Arc::new(AtomicBool::new(false));
                     guard_unload(unsaved.clone());
-                    Ok(Box::new(WebShell { app, inbox, unsaved, served, database, presets }))
+                    Ok(Box::new(WebShell { app, inbox, unsaved, served, database, presets, pending_file, opened_file: false }))
                 }),
             )
             .await;
@@ -158,8 +180,35 @@ fn guard_unload(unsaved: Arc<AtomicBool>) {
     }
 }
 
+fn open_invite(app: &mut PhotocraftApp, invitation: craft_cloud_client::invite::Invitation) {
+    let name = invitation.name.clone();
+    match photocraft_ui_egui::cloud::CloudApp::open_bytes(app, &name, invitation.document.clone()) {
+        Ok(Some(_)) => {
+            let mode = if invitation.read_only() { " (view only)" } else { "" };
+            let who = if invitation.recipient.is_empty() { String::new() } else { format!(" (shared with {})", invitation.recipient) };
+            app.ui.status = format!("Opened \"{name}\"{mode}{who}");
+            app.ui.status_error = false;
+            if let Err(e) = invitation.join() {
+                log::warn!("invite relay join failed: {e}");
+            }
+        }
+        Ok(None) => {
+            app.ui.status = format!("Shared \"{name}\" needs a choice before it opens");
+            app.ui.status_error = false;
+        }
+        Err(e) => {
+            log::error!("invite open failed: {e}");
+            craft_cloud_client::invite::refuse(&format!("The shared document could not be opened. {e}"));
+        }
+    }
+}
+
 fn query() -> String {
     web_sys::window().and_then(|w| w.location().search().ok()).unwrap_or_default()
+}
+
+fn query_param(key: &str) -> Option<String> {
+    web_sys::UrlSearchParams::new_with_str(&query()).ok()?.get(key)
 }
 
 /// Reads the served font manifest, if the host has one, and lists its families in the font menus.
@@ -228,6 +277,10 @@ struct WebShell {
     served: Served,
     database: Option<web_sys::IdbDatabase>,
     presets: crate::preset_bridge::Bridge,
+    /// A cloud file handle from `?file=<id>`, opened once the account and provider link arrive.
+    pending_file: Option<String>,
+    /// Whether `pending_file` has been acted on (or there was none).
+    opened_file: bool,
 }
 
 impl WebShell {
@@ -301,6 +354,34 @@ impl eframe::App for WebShell {
         }
         self.serve_fonts(ctx);
         self.app.logic(ctx, frame);
+        // Open a document passed as `?file=<id>` once the account and provider link are confirmed.
+        // The account check avoids starting a read before the session is established.
+        if !self.opened_file {
+            if let Some(id) = self.pending_file.clone() {
+                if self.app.cloud.account.as_ref().is_some_and(|a| a.provider_linked) {
+                    self.opened_file = true;
+                    photocraft_ui_egui::cloud::open_entry(
+                        &mut self.app,
+                        Entry {
+                            id,
+                            room: String::new(),
+                            name: "document.pcraft".to_owned(),
+                            path: String::new(),
+                            kind: EntryKind::File,
+                            size: None,
+                            modified: None,
+                            mime: None,
+                            etag: None,
+                            writable: true,
+                            shared_by: None,
+                        },
+                        None,
+                    );
+                }
+            } else if self.app.cloud.account.is_some() {
+                self.opened_file = true;
+            }
+        }
         self.save_presets(ctx);
     }
 

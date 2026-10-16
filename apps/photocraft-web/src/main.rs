@@ -23,6 +23,9 @@ mod preset_bridge;
 mod indexed_presets;
 
 #[cfg(target_arch = "wasm32")]
+mod cloud;
+
+#[cfg(target_arch = "wasm32")]
 mod web;
 
 #[cfg(target_arch = "wasm32")]
@@ -37,6 +40,14 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
+    /// CollabCraft's sign-out endpoint lives under `/auth/`; posting to a bare `/logout` gets a 404.
+    #[test]
+    fn cloud_logout_posts_to_auth_namespace() {
+        let src = include_str!("cloud.rs");
+        assert!(src.contains("\"/auth/logout\""), "logout must POST to /auth/logout");
+        assert!(!src.contains("\"/logout\""), "bare /logout route must not remain");
+    }
+
     /// A WebAssembly module that never downloads (or doesn't match the page) runs no Rust, so the
     /// page itself replaces the endless "Loading" with what may have gone wrong and a way to
     /// retry, without a hand-written script.
