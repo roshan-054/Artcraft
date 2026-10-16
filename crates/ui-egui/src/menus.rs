@@ -1208,6 +1208,9 @@ pub fn menu_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> f32 {
                 buttons.push(title);
             }
             edge = if rtl { buttons.iter().map(|b| b.rect.left()).fold(edge, f32::min) } else { buttons.iter().map(|b| b.rect.right()).fold(edge, f32::max) };
+            if let (Some(first), Some(last)) = (buttons.first(), buttons.last()) {
+                crate::zoom_field::set_menu_bar_rect(ui.ctx(), first.rect.union(last.rect));
+            }
             switch_on_hover(ui.ctx(), &buttons);
             // ← and → step to the menu on that side, so in screen order.
             let mut tops: Vec<egui::Id> = buttons.iter().map(egui::Popup::default_response_id).collect();
@@ -1354,7 +1357,7 @@ fn help_search(ui: &mut egui::Ui, items: &[MenuItem], opening: bool, clicked: &m
     let field = ui.add(egui::TextEdit::singleline(&mut query).id(text_id.with("field")).hint_text(crate::i18n::tr(lang, "Search menus")).desired_width(220.0));
     // The menu opens on the press; the release a frame later completes a click on the title,
     // outside the field, and egui takes the focus away from it again (#1447, #1438).
-    if reopened || opening {
+    if (reopened || opening) && !crate::zoom_field::editing(&ctx) {
         field.request_focus();
     }
     let results = search_items(items, &query, lang);
