@@ -42,6 +42,57 @@ fn lerp_pt(a: &StrokePoint, b: &StrokePoint, f: f64) -> StrokePoint {
     }
 }
 
+#[inline]
+fn tangent_unit(prev: Option<&StrokePoint>, curr: &StrokePoint, next: Option<&StrokePoint>) -> (f64, f64) {
+    let d_in = prev.map(|p| (curr.x - p.x, curr.y - p.y));
+    let d_out = next.map(|n| (n.x - curr.x, n.y - curr.y));
+    let u_in = d_in.and_then(|(dx, dy)| {
+        let len = (dx * dx + dy * dy).sqrt();
+        (len > 1e-9).then_some((dx / len, dy / len))
+    });
+    let u_out = d_out.and_then(|(dx, dy)| {
+        let len = (dx * dx + dy * dy).sqrt();
+        (len > 1e-9).then_some((dx / len, dy / len))
+    });
+    match (u_in, u_out) {
+        (Some((x0, y0)), Some((x1, y1))) => {
+            let (sx, sy) = (x0 + x1, y0 + y1);
+            let slen = (sx * sx + sy * sy).sqrt();
+            if slen > 1e-6 { (sx / slen, sy / slen) } else { (x1, y1) }
+        }
+        (Some(u), None) | (None, Some(u)) => u,
+        (None, None) => (1.0, 0.0),
+    }
+}
+
+#[inline]
+fn cubic_bezier_eval(p0: &StrokePoint, c0: (f64, f64), c1: (f64, f64), p1: &StrokePoint, t: f64) -> (StrokePoint, (f64, f64)) {
+    let u = 1.0 - t;
+    let tt = t * t;
+    let uu = u * u;
+    let uuu = uu * u;
+    let ttt = tt * t;
+
+    let x = if (p0.x - p1.x).abs() < 1e-9 && (c0.0 - p1.x).abs() < 1e-9 && (c1.0 - p1.x).abs() < 1e-9 {
+        p0.x
+    } else {
+        uuu * p0.x + 3.0 * uu * t * c0.0 + 3.0 * u * tt * c1.0 + ttt * p1.x
+    };
+    let y = if (p0.y - p1.y).abs() < 1e-9 && (c0.1 - p1.y).abs() < 1e-9 && (c1.1 - p1.y).abs() < 1e-9 {
+        p0.y
+    } else {
+        uuu * p0.y + 3.0 * uu * t * c0.1 + 3.0 * u * tt * c1.1 + ttt * p1.y
+    };
+
+    let dx = 3.0 * uu * (c0.0 - p0.x) + 6.0 * u * t * (c1.0 - c0.0) + 3.0 * tt * (p1.x - c1.0);
+    let dy = 3.0 * uu * (c0.1 - p0.y) + 6.0 * u * t * (c1.1 - c0.1) + 3.0 * tt * (p1.y - c1.1);
+
+    let mut pt = lerp_pt(p0, p1, t);
+    pt.x = x;
+    pt.y = y;
+    (pt, (dx, dy))
+}
+
 // ---------------------------------------------------------------------------
 // Smoothing
 // ---------------------------------------------------------------------------
@@ -69,6 +120,7 @@ impl Smoother {
     pub fn push(&mut self, p: StrokePoint, out: &mut Vec<StrokePoint>) {
         let prev_input = self.last_input.replace(p);
         if !self.active() {
+            self.pos = Some(p);
             out.push(p);
             return;
         }
@@ -148,6 +200,11 @@ impl Smoother {
             out.push(last);
         }
     }
+
+    /// The smoothed brush position so far, before any end-of-stroke catch-up.
+    pub fn current_pos(&self) -> Option<StrokePoint> {
+        self.pos
+    }
 }
 
 /// Smooth a whole point list with the brush's smoothing settings.
@@ -176,7 +233,7 @@ pub struct StepInput {
     pub step: u64,
 }
 
-/// Walks a polyline and emits steps every `step_len(point)` pixels, plus airbrush steps in time.
+/// Walks a polyline or smooth curve and emits steps every `step_len(point)` pixels, plus airbrush steps in time.
 #[derive(Clone, Debug)]
 pub struct PathWalker {
     last: Option<StrokePoint>,
@@ -193,6 +250,11 @@ pub struct PathWalker {
     /// Speed spacing (Spacing unchecked): one step per this many ms of stroke time.
     speed: Option<f64>,
     speed_acc: f64,
+    /// Smooth curve interpolation between vertices to eliminate sharp corners on fast strokes.
+    curved: bool,
+    p0: Option<StrokePoint>,
+    p1: Option<StrokePoint>,
+    last_step_len: f64,
     /// Pixel-grid stepping for small aliased tips: the dab-centre offset inside a pixel (see
     /// [`PathWalker::pixel_grid`]).
     grid: Option<f64>,
@@ -211,8 +273,18 @@ impl PathWalker {
             time_acc: 0.0,
             speed: None,
             speed_acc: 0.0,
+            curved: false,
+            p0: None,
+            p1: None,
+            last_step_len: 1.0,
             grid: None,
         }
+    }
+
+    /// Enable smooth curve interpolation between points (cubic Hermite / Catmull-Rom spline).
+    pub fn curved(mut self, enabled: bool) -> Self {
+        self.curved = enabled;
+        self
     }
 
     /// Step pixel by pixel instead of by distance: one step per pixel along the segment's major
@@ -259,14 +331,8 @@ impl PathWalker {
         out(s);
     }
 
-    pub fn push(&mut self, p: StrokePoint, step_len: &impl Fn(&StrokePoint) -> f64, out: &mut impl FnMut(StepInput)) {
-        let Some(a) = self.last else {
-            self.last = Some(p);
-            self.pending_first = Some(p);
-            self.next_at = step_len(&p);
-            return;
-        };
-        let (dx, dy) = (p.x - a.x, p.y - a.y);
+    fn walk_straight_segment(&mut self, a: &StrokePoint, b: &StrokePoint, step_len: &impl Fn(&StrokePoint) -> f64, out: &mut impl FnMut(StepInput)) {
+        let (dx, dy) = (b.x - a.x, b.y - a.y);
         let len = (dx * dx + dy * dy).sqrt();
         if len > 1e-9 {
             self.dir = (-dy).atan2(dx) as f32;
@@ -278,44 +344,52 @@ impl PathWalker {
             self.emit(f, out);
         }
         if len > 1e-9 {
-            // Speed spacing needs the segment's duration; without timestamps (a straight ⇧-click
-            // line, or input that carries no times) the segment is spaced by distance instead.
-            let dt = p.time - a.time;
+            let dt = b.time - a.time;
             match self.speed.filter(|_| dt > 0.0 && dt.is_finite()) {
                 None => {
-                    if !self.grid.is_some_and(|g| self.grid_steps(&a, &p, g, out)) {
+                    if !self.grid.is_some_and(|g| self.grid_steps(a, b, g, out)) {
                         while self.next_at <= len + 1e-9 {
-                            let q = lerp_pt(&a, &p, (self.next_at / len).min(1.0));
+                            let q = lerp_pt(a, b, (self.next_at / len).min(1.0));
                             self.emit(q, out);
-                            self.next_at += step_len(&q).max(0.25);
+                            let sl = step_len(&q).max(0.25);
+                            self.last_step_len = sl;
+                            self.next_at += sl;
                         }
                         self.next_at -= len;
                     }
                 }
                 Some(iv) => {
-                    self.speed_acc += dt;
-                    let max_n = (len / MIN_SPEED_STEP).ceil().max(1.0) as usize;
-                    let mut n = 0;
-                    while self.speed_acc >= iv && n < max_n {
-                        self.speed_acc -= iv;
-                        let f = ((dt - self.speed_acc) / dt).clamp(0.0, 1.0);
-                        self.emit(lerp_pt(&a, &p, f), out);
-                        n += 1;
-                    }
-                    if n == max_n {
-                        self.speed_acc = self.speed_acc.rem_euclid(iv);
+                    if dt > 0.0 && dt.is_finite() {
+                        self.speed_acc += dt;
+                        let max_n = (len / MIN_SPEED_STEP).ceil().max(1.0) as usize;
+                        let mut n = 0;
+                        while self.speed_acc >= iv && n < max_n {
+                            self.speed_acc -= iv;
+                            let f = ((dt - self.speed_acc) / dt).clamp(0.0, 1.0);
+                            let q = lerp_pt(a, b, f);
+                            self.last_step_len = step_len(&q).max(0.25);
+                            self.emit(q, out);
+                            n += 1;
+                        }
+                        if n == max_n {
+                            self.speed_acc = self.speed_acc.rem_euclid(iv);
+                        }
+                    } else {
+                        // No timestamps: one dab per input point.
+                        self.last_step_len = step_len(b).max(0.25);
+                        self.emit(*b, out);
                     }
                 }
             }
         }
         if let Some(iv) = self.interval {
-            let dt = p.time - a.time;
+            let dt = b.time - a.time;
             if dt > 0.0 && dt.is_finite() {
                 if dt > iv * MAX_AIRBRUSH_DABS_PER_SEGMENT as f64 {
                     // A stalled or hostile timestamp must not replay an arbitrarily long backlog.
                     self.time_acc = 0.0;
-                    self.emit(p, out);
-                    self.last = Some(p);
+                    self.emit(*b, out);
+                    self.last = Some(*b);
                     return;
                 }
                 self.time_acc += dt;
@@ -323,11 +397,101 @@ impl PathWalker {
                 while self.time_acc >= iv && n < MAX_AIRBRUSH_DABS_PER_SEGMENT {
                     self.time_acc -= iv;
                     let f = ((dt - self.time_acc) / dt).clamp(0.0, 1.0);
-                    self.emit(lerp_pt(&a, &p, f), out);
+                    let q = lerp_pt(a, b, f);
+                    self.last_step_len = step_len(&q).max(0.25);
+                    self.emit(q, out);
                     n += 1;
                 }
             }
         }
+    }
+
+    fn walk_cubic_segment(
+        &mut self,
+        p0: Option<StrokePoint>,
+        p1: &StrokePoint,
+        p2: &StrokePoint,
+        next: Option<&StrokePoint>,
+        step_len: &impl Fn(&StrokePoint) -> f64,
+        out: &mut impl FnMut(StepInput),
+    ) {
+        let (dx, dy) = (p2.x - p1.x, p2.y - p1.y);
+        let chord_len = (dx * dx + dy * dy).sqrt();
+        if chord_len <= 1e-9 {
+            return;
+        }
+
+        let t1 = tangent_unit(p0.as_ref(), p1, Some(p2));
+        let t2 = tangent_unit(Some(p1), p2, next);
+
+        let arm = chord_len / 3.0;
+        let c1 = (p1.x + t1.0 * arm, p1.y + t1.1 * arm);
+        let c2 = (p2.x - t2.0 * arm, p2.y - t2.1 * arm);
+
+        let poly_len = ((c1.0 - p1.x).powi(2) + (c1.1 - p1.y).powi(2)).sqrt()
+            + ((c2.0 - c1.0).powi(2) + (c2.1 - c1.1).powi(2)).sqrt()
+            + ((p2.x - c2.0).powi(2) + (p2.y - c2.1).powi(2)).sqrt();
+        let approx_len = (chord_len + poly_len) * 0.5;
+
+        let sub_steps = ((approx_len / 2.0).ceil() as usize).clamp(8, 64);
+        let mut prev = *p1;
+        for i in 1..=sub_steps {
+            let t = i as f64 / sub_steps as f64;
+            let (pt, (tan_x, tan_y)) = cubic_bezier_eval(p1, c1, c2, p2, t);
+
+            if (tan_x * tan_x + tan_y * tan_y) > 1e-9 {
+                self.dir = (-tan_y).atan2(tan_x) as f32;
+                if self.initial_dir.is_none() {
+                    self.initial_dir = Some(self.dir);
+                }
+            }
+
+            self.walk_straight_segment(&prev, &pt, step_len, out);
+            prev = pt;
+        }
+    }
+
+    pub fn push(&mut self, p: StrokePoint, step_len: &impl Fn(&StrokePoint) -> f64, out: &mut impl FnMut(StepInput)) {
+        if !self.curved {
+            let Some(a) = self.last else {
+                self.last = Some(p);
+                self.pending_first = Some(p);
+                self.next_at = step_len(&p);
+                self.last_step_len = self.next_at;
+                return;
+            };
+            self.walk_straight_segment(&a, &p, step_len, out);
+            self.last = Some(p);
+            return;
+        }
+
+        // Smooth continuous cubic spline interpolation
+        let Some(p1) = self.p1 else {
+            self.p1 = Some(p);
+            self.last = Some(p);
+            self.pending_first = Some(p);
+            self.next_at = step_len(&p);
+            self.last_step_len = self.next_at;
+            return;
+        };
+
+        let (dx, dy) = (p.x - p1.x, p.y - p1.y);
+        if (dx * dx + dy * dy) < 1e-9 {
+            return;
+        }
+
+        self.dir = (-dy).atan2(dx) as f32;
+        if self.initial_dir.is_none() {
+            self.initial_dir = Some(self.dir);
+        }
+        if let Some(f) = self.pending_first.take() {
+            self.emit(f, out);
+        }
+
+        let p0 = self.p0;
+        self.walk_cubic_segment(p0, &p1, &p, None, step_len, out);
+        self.p0 = Some(p1);
+        self.p1 = Some(p);
         self.last = Some(p);
     }
 
@@ -695,7 +859,12 @@ impl DabGenerator {
         let brush = brush.bounded_for_render();
         let interval = brush.build_up.then(|| 1000.0 / f64::from(brush.build_up_rate.clamp(0.1, 1000.0)));
         let dual_on = brush.dual_brush.enabled;
-        let mut walker = if brush.spacing_enabled { PathWalker::new(interval) } else { PathWalker::new(interval).speed_spacing(SPEED_SPACING_MS) };
+        let curved = brush.spacing_enabled && !brush.build_up && !brush.smoothing.pulled_string && !brush.aliased;
+        let mut walker = if brush.spacing_enabled {
+            PathWalker::new(interval).curved(curved)
+        } else {
+            PathWalker::new(interval).speed_spacing(SPEED_SPACING_MS).curved(curved)
+        };
         // A small aliased tip whose dabs are at most a pixel apart steps pixel by pixel (#2139).
         if brush.aliased && brush.size * brush.spacing.max(0.01) <= 1.0 {
             walker = walker.pixel_grid(f64::from(crate::render::grid_center(0.0, 0.0, brush.size).0));
@@ -703,7 +872,7 @@ impl DabGenerator {
         Self {
             smoother: Smoother::new(&brush.smoothing, zoom),
             walker,
-            dual_walker: dual_on.then(|| PathWalker::new(None)),
+            dual_walker: dual_on.then(|| PathWalker::new(None).curved(curved)),
             builder: DabBuilder::new(&brush),
             dual: dual_on.then(|| DualBuilder::new(&brush)),
             scratch: Vec::new(),
@@ -759,5 +928,15 @@ impl DabGenerator {
                 db.build(s, dual);
             }
         }
+    }
+
+    /// Current smoothed brush position.
+    pub fn current_pos(&self) -> Option<StrokePoint> {
+        self.smoother.current_pos()
+    }
+
+    /// Whether stroke smoothing is active.
+    pub fn is_smoothing_active(&self) -> bool {
+        self.smoother.active()
     }
 }
