@@ -59,6 +59,7 @@ mod photoshop_settings;
 mod portal_save;
 mod presentation;
 mod screen_color;
+mod deviantart_api;
 mod services;
 // macOS gets one instance from LaunchServices (open-documents Apple events).
 #[cfg(any(not(target_os = "macos"), test))]
