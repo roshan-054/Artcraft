@@ -27,6 +27,9 @@ env:
   # disk with full debug info). The Windows test legs drop debuginfo entirely (see the test job).
   CARGO_PROFILE_DEV_DEBUG: line-tables-only
 
+permissions:
+  contents: read
+
 # A newer push to a PR branch cancels its older run. Runs on main are never cancelled: a merge
 # that lands while main's run is in progress waits for it, so every main state that gets a run is
 # checked to the end. (Cancelling here left main unverified whenever merges came close together.)
@@ -417,7 +420,10 @@ jobs:
         run: cargo install cargo-fuzz --locked
       - name: Fuzz
         working-directory: crates/${{ matrix.target.crate }}
-        run: cargo fuzz run ${{ matrix.target.name }} ${{ matrix.target.args }} -- -max_total_time=${{ inputs.fuzz_seconds }}
+        # The dispatch input goes through env so it is never spliced into the script as code.
+        env:
+          FUZZ_SECONDS: ${{ inputs.fuzz_seconds }}
+        run: cargo fuzz run ${{ matrix.target.name }} ${{ matrix.target.args }} -- -max_total_time="$FUZZ_SECONDS"
       - name: Upload crash artifacts
         if: failure()
         uses: actions/upload-artifact@v4
