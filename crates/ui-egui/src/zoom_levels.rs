@@ -90,6 +90,35 @@ pub fn step(zoom: f32, dir: i32, size: [u32; 2]) -> f32 {
     step_in_range(zoom, dir, min(size), MAX)
 }
 
+/// Where a view keeps the zoom it still has to travel (`ln(target / zoom)`) after a zoom was typed
+/// into a zoom field. `canvas_view` spends it a little each frame, the way egui spends a wheel
+/// notch into `smooth_scroll_delta` (90 % of the way in 0.2 s), instead of jumping.
+pub fn pending_id(idx: usize) -> egui::Id {
+    egui::Id::new(("pc-zoom-pending", idx))
+}
+
+/// The percent a zoom field shows: the zoom a typed value is still gliding to, else the zoom. The
+/// field then keeps the number that was typed for the whole glide, instead of counting through it.
+pub fn field_percent(ctx: &egui::Context, idx: usize, zoom: f32) -> f32 {
+    let pending = ctx.data(|d| d.get_temp::<f32>(pending_id(idx))).filter(|p| p.is_finite()).unwrap_or(0.0);
+    zoom * pending.exp() * 100.0
+}
+
+/// Applies the percent a zoom field reported as changed. A scrub (a drag on the field or its
+/// label) follows the pointer at once; a typed or stepped value only leaves the distance to
+/// travel, for `canvas_view` to spend.
+pub fn set_from_field(ctx: &egui::Context, idx: usize, view: &mut crate::state::View, scrub: bool, percent: f32) {
+    let target = clamp(percent / 100.0, view.doc_size);
+    view.fit_pending = false;
+    let pending = if scrub || !(view.zoom > 0.0) {
+        view.zoom = target;
+        0.0
+    } else {
+        (target / view.zoom).ln()
+    };
+    ctx.data_mut(|d| d.insert_temp(pending_id(idx), pending));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -169,5 +198,53 @@ mod tests {
         assert_eq!(clamp(f32::NAN, PHOTO), 1.0);
         assert_eq!(clamp(f32::INFINITY, PHOTO), 1.0);
         assert_eq!(clamp(3.3, PHOTO), 3.3);
+    }
+
+    #[test]
+    fn a_typed_zoom_waits_for_the_canvas_and_a_scrub_does_not() {
+        let ctx = egui::Context::default();
+        let pending = |idx| ctx.data(|d| d.get_temp::<f32>(pending_id(idx)));
+        let mut v = crate::state::View { zoom: 0.5, doc_size: PHOTO, fit_pending: true, ..Default::default() };
+        set_from_field(&ctx, 0, &mut v, false, 150.0);
+        assert_eq!(v.zoom, 0.5, "typing does not move the zoom itself");
+        assert!(!v.fit_pending);
+        assert!((pending(0).unwrap() - 3.0_f32.ln()).abs() < 1e-6, "the distance left is ln(150 / 50)");
+        set_from_field(&ctx, 0, &mut v, true, 200.0);
+        assert_eq!(v.zoom, 2.0, "a scrub applies at once");
+        assert_eq!(pending(0), Some(0.0), "and drops what was left");
+        set_from_field(&ctx, 1, &mut v, false, 1.0e9);
+        assert!((pending(1).unwrap() - (MAX / 2.0).ln()).abs() < 1e-5, "the target is clamped to the zoom range first");
+    }
+
+    /// The distance a typed zoom leaves is `ln(target / zoom)`, out or in, for a tiny step and a
+    /// huge one, and nothing for the zoom it already has.
+    #[test]
+    fn a_typed_zoom_leaves_the_log_distance_to_the_clamped_target() {
+        let ctx = egui::Context::default();
+        // (zoom now, percent typed)
+        let cases = [(2.0_f32, 25.0_f32), (0.1, 800.0), (1.0, 100.5), (0.37, 1234.0), (1.0, 100.0), (1.0, 1.0e9)];
+        for (i, (zoom, percent)) in cases.into_iter().enumerate() {
+            let mut v = crate::state::View { zoom, doc_size: PHOTO, ..Default::default() };
+            set_from_field(&ctx, i, &mut v, false, percent);
+            let left = ctx.data(|d| d.get_temp::<f32>(pending_id(i))).expect("a distance is stored");
+            let want = (clamp(percent / 100.0, PHOTO) / zoom).ln();
+            assert!((left - want).abs() < 1e-5, "{percent} % over {zoom}: {left} vs {want}");
+            assert_eq!(v.zoom, zoom, "typing never moves the zoom itself");
+        }
+    }
+
+    #[test]
+    fn a_zoom_field_shows_the_zoom_it_is_gliding_to() {
+        let ctx = egui::Context::default();
+        let mut v = crate::state::View { zoom: 2.0, doc_size: PHOTO, ..Default::default() };
+        assert!((field_percent(&ctx, 0, v.zoom) - 200.0).abs() < 1e-3, "no glide: the zoom");
+        set_from_field(&ctx, 0, &mut v, false, 100.0);
+        assert!((field_percent(&ctx, 0, v.zoom) - 100.0).abs() < 1e-3, "typed 100, zoom still 200 %");
+        // Halfway through the glide, the way `canvas_view` spends the distance.
+        let pending = ctx.data(|d| d.get_temp::<f32>(pending_id(0))).unwrap();
+        v.zoom *= (pending / 2.0).exp();
+        ctx.data_mut(|d| d.insert_temp(pending_id(0), pending / 2.0));
+        let shown = field_percent(&ctx, 0, v.zoom);
+        assert!((shown - 100.0).abs() < 1e-3, "still 100 half way: {shown}");
     }
 }

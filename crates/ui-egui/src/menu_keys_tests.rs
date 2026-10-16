@@ -210,3 +210,38 @@ fn the_shortcuts_wait_while_the_keyboard_is_on_the_bar() {
     h.run_steps(3);
     assert_ne!(h.state().ui.tool, tool, "off the bar, E picks the Eraser again");
 }
+
+/// Typing a zoom: Alt only asks for the system alert. The bar does not take the keyboard, and the
+/// field keeps its focus and its text.
+#[test]
+fn alt_in_a_zoom_field_only_alerts() {
+    let mut h = Harness::builder().with_size(egui::vec2(1280.0, 720.0)).build_ui_state(
+        |ui, (app, pct): &mut (PhotocraftApp, f32)| {
+            crate::menus::menu_bar(app, ui);
+            crate::widgets::compact_wrapping_value_field(ui, pct, 0.0..=12800.0, "%", egui::vec2(90.0, 20.0));
+        },
+        (app(), 100.0),
+    );
+    PhotocraftApp::setup_context(&h.ctx, crate::theme::ThemeKind::ALL[0]);
+    h.run_steps(3);
+    h.get_by_role(egui::accesskit::Role::SpinButton).click();
+    h.run_steps(2);
+    for c in "200".chars() {
+        h.event(egui::Event::Text(c.to_string()));
+        h.run_steps(2);
+    }
+    h.key_down(egui::Key::AltLeft);
+    h.run_steps(2);
+    h.key_up(egui::Key::AltLeft);
+    h.run_steps(3);
+    assert_eq!(Keys::current(&h.ctx).focus, None, "Alt does not put the keyboard on the bar");
+    assert!(crate::zoom_field::alert_pending(&h.ctx), "it asks for the alert instead");
+    assert_eq!(h.state().1, 100.0, "and the zoom stays");
+    assert!(h.get_by_role(egui::accesskit::Role::SpinButton).is_focused(), "the field keeps the keyboard");
+    // The text was not selected by Alt: this adds to 200 instead of replacing it.
+    h.event(egui::Event::Text("3".into()));
+    h.run_steps(2);
+    h.key_press(egui::Key::Enter);
+    h.run_steps(3);
+    assert_eq!(h.state().1, 2003.0, "typing went on in the same text");
+}

@@ -234,6 +234,7 @@ pub mod wide_angle_ui;
 pub mod widgets;
 pub mod work_area;
 pub mod workspace_ui;
+pub mod zoom_field;
 pub mod zoom_levels;
 pub mod zoom_tool;
 
@@ -466,6 +467,10 @@ pub struct Services {
     /// Preferences ▸ General ▸ Beep When Done: the platform's default beep, played when a
     /// background job finishes successfully. `None` in the web build (and in tests).
     pub beep: Option<fn()>,
+    /// The system's alert sound, played when a key does nothing in a zoom field being typed in
+    /// (Tab, Alt; see `zoom_field`): on Windows `MessageBeep(MB_ICONASTERISK)`, the Asterisk
+    /// sound. Falls back to [`Self::beep`] when unset. `None` in the web build (and in tests).
+    pub alert: Option<fn()>,
     /// Files delivered asynchronously (web drag-and-drop): drained every frame.
     pub inbox: Option<Inbox>,
     /// OS clipboard images: copies go out, screenshots and images from other apps come in.
@@ -1852,6 +1857,8 @@ impl eframe::App for PhotocraftApp {
         // maximize it into the work area once (#315).
         work_area::fit_window(ctx);
         discard_ui::guard_window_close(self, ctx);
+        // A zoom field being typed in: plays its alert, and notes a click on the pasteboard.
+        zoom_field::tick(self, ctx);
         // Background jobs: apply finished ones, keep frames coming, Esc cancels (before the
         // shortcuts see Esc).
         if !screen_picker::tick(self, ctx) {

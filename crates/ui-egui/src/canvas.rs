@@ -2951,6 +2951,24 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
         }
         view.doc_size = size;
     }
+    // A zoom typed into a zoom field is spent over a few frames, the way egui spends a wheel notch
+    // into `smooth_scroll_delta`: the same smoothing (90 % of the way, but in 0.2 s instead of 0.1 s),
+    // on the distance left to zoom in log space. `zoom_levels::set_from_field` leaves that distance.
+    if primary {
+        let id = crate::zoom_levels::pending_id(idx);
+        let pending = ctx.data(|d| d.get_temp::<f32>(id)).unwrap_or(0.0);
+        if pending != 0.0 {
+            if view.fit_pending || view.fill_pending || !pending.is_finite() {
+                ctx.data_mut(|d| d.remove::<f32>(id));
+            } else {
+                let t = egui::emath::exponential_smooth_factor(0.90, 0.2, ctx.input(|i| i.stable_dt).min(0.2));
+                let step = if pending.abs() < 0.002 { pending } else { t * pending };
+                view.zoom = crate::zoom_levels::clamp(view.zoom * step.exp(), view.doc_size);
+                ctx.data_mut(|d| d.insert_temp(id, pending - step));
+                ctx.request_repaint();
+            }
+        }
+    }
     // View › Pixel Aspect Ratio Correction: document pixels are shown this much wider.
     let aspect = app.ui.view.display_aspect();
     if view.fit_pending && rect.width() > 50.0 {
