@@ -458,8 +458,7 @@ fn save_a_copy(s: &mut Session, p: &Value) -> Result<Value> {
     let opts = SaveOpts::from_params(s, p, "file.saveACopy")?;
     let warnings = if recovery {
         let (bytes, warnings) = encode(&doc, &path, opts)?;
-        photocraft_io::write_recovery_copy_bytes(std::path::Path::new(&path), &bytes)
-            .map_err(|e| EngineError::Other(e.to_string()))?;
+        photocraft_io::write_recovery_copy_bytes(std::path::Path::new(&path), &bytes).map_err(|e| EngineError::Other(e.to_string()))?;
         warnings
     } else {
         save_doc(&doc, &path, opts)?
@@ -1795,7 +1794,11 @@ mod psd_recovery_tests {
         let mut s = Session::new();
         s.execute("file.new", json!({"width": 2, "height": 2})).unwrap();
         s.active_mut().unwrap().recovery_mode = true;
-        let path = std::env::temp_dir().join(format!("photocraft-engine-recovery-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let path = std::env::temp_dir().join(format!(
+            "photocraft-engine-recovery-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
         std::fs::write(&path, b"original").unwrap();
         assert!(s.execute("file.saveACopy", json!({"path": path})).is_err());
         assert_eq!(std::fs::read(&path).unwrap(), b"original");

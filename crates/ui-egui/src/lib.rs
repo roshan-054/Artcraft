@@ -1322,13 +1322,10 @@ impl PhotocraftApp {
         let max_svg_group_depth = self.session.prefs().file_handling.rasterize_svg_groups_deeper_than as usize;
         let (doc, warnings, recovery_mode) = match import(name, bytes, max_svg_group_depth) {
             Ok((doc, warnings)) => (doc, warnings, false),
-            Err(error) if photocraft_io::is_psd(bytes) => {
-                match photocraft_io::import_psd_for_recovery(name, bytes) {
-                    Ok(r) if r.source_read_only && r.warnings.iter().any(|w| w.starts_with("PSD/PSB RECOVERY:")) =>
-                        (r.document, r.warnings, true),
-                    _ => return Err(error),
-                }
-            }
+            Err(error) if photocraft_io::is_psd(bytes) => match photocraft_io::import_psd_for_recovery(name, bytes) {
+                Ok(r) if r.source_read_only && r.warnings.iter().any(|w| w.starts_with("PSD/PSB RECOVERY:")) => (r.document, r.warnings, true),
+                _ => return Err(error),
+            },
             Err(error) => return Err(error),
         };
         // Edit › Color Settings policies apply on open; Ask When Opening holds the file back
@@ -1416,8 +1413,7 @@ impl PhotocraftApp {
             return Err("Answer TIFF or Targa Options before starting another save".into());
         }
         // Edit Contents documents save back into their smart object.
-        if path.is_none() && !self.session.active().is_some_and(|st| st.recovery_mode)
-            && self.session.is_enabled("layer.smartObjects.saveContents") {
+        if path.is_none() && !self.session.active().is_some_and(|st| st.recovery_mode) && self.session.is_enabled("layer.smartObjects.saveContents") {
             self.run("layer.smartObjects.saveContents", serde_json::json!({}))?;
             return Ok(serde_json::json!({"path": "smart object", "warnings": []}));
         }
@@ -1446,12 +1442,12 @@ impl PhotocraftApp {
             match &st.path {
                 Some(p) if writable => p.clone(),
                 p => {
-                let source = p.as_deref().unwrap_or(&st.doc.name);
-                let ext = match photocraft_engine::file_cmds::extension(source).as_deref() {
-                    Some("pdn") => "pcraft",
-                    Some("kra" | "krz") => "ora",
-                    _ => "psd",
-                };
+                    let source = p.as_deref().unwrap_or(&st.doc.name);
+                    let ext = match photocraft_engine::file_cmds::extension(source).as_deref() {
+                        Some("pdn") => "pcraft",
+                        Some("kra" | "krz") => "ora",
+                        _ => "psd",
+                    };
                     std::path::Path::new(source).with_extension(ext).to_string_lossy().into_owned()
                 }
             }

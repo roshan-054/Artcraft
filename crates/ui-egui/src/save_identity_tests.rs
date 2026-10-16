@@ -259,16 +259,19 @@ fn save_settings_start_at_the_opened_files_encoding() {
 #[test]
 fn recovery_session_remains_protected_after_saving_a_copy() {
     let mut app = app();
-    let dir = std::env::temp_dir().join(format!("photocraft-recovery-ui-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+    let dir = std::env::temp_dir().join(format!(
+        "photocraft-recovery-ui-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+    ));
     std::fs::create_dir(&dir).unwrap();
     let original = dir.join("original.psd");
     let copy = dir.join("copy.psd");
     std::fs::write(&original, b"valuable original bytes").unwrap();
     app.session.active_mut().unwrap().recovery_mode = true;
     app.session.active_mut().unwrap().source_read_only = true;
-    app.services.recovery_write = Some(Box::new(|path, bytes| {
-        photocraft_io::write_recovery_copy_bytes(std::path::Path::new(path), bytes).map_err(|e| e.to_string())
-    }));
+    app.services.recovery_write =
+        Some(Box::new(|path, bytes| photocraft_io::write_recovery_copy_bytes(std::path::Path::new(path), bytes).map_err(|e| e.to_string())));
     let own = identity(&app);
     assert!(app.save_as(Some(original.to_string_lossy().into_owned())).is_err());
     app.save_as(Some(copy.to_string_lossy().into_owned())).unwrap();
