@@ -78,7 +78,7 @@ jobs:
           else
             echo "web=false" >> "$GITHUB_OUTPUT"
           fi
-          if git diff --name-only "$BASE" HEAD | grep -Eq '^(apps/|crates/(ui-egui|text|gpu|tablet|heif)/|Cargo\.lock$|(.*/)?build\.rs$|\.github/workflows/ci\.yml$)'; then
+          if git diff --name-only "$BASE" HEAD | grep -Eq '^(apps/|crates/(ui-egui|text|gpu|tablet|heif|jxl)/|Cargo\.lock$|(.*/)?build\.rs$|\.github/workflows/ci\.yml$)'; then
             echo "legs=$all" >> "$GITHUB_OUTPUT"
           else
             echo "legs=[$linux]" >> "$GITHUB_OUTPUT"
@@ -154,7 +154,7 @@ jobs:
       # Keep formatting, strict Clippy, layering and scorecard checks ahead of tests.
       - name: Clippy
         if: matrix.part == 'all' || matrix.part == 'integration'
-        run: cargo clippy --workspace --all-targets --locked --features heif -- -D warnings
+        run: cargo clippy --workspace --all-targets --locked --features heif,jxl -- -D warnings
 
       - name: Dependency layering
         if: matrix.part == 'all' || matrix.part == 'integration'
@@ -172,7 +172,8 @@ jobs:
         with:
           tool: cargo-nextest@0.9.146
 
-      # `--features heif`: official builds open HEIC photos via the optional photocraft-heif crate.
+      # `--features heif,jxl`: official builds open HEIC photos and JPEG XL images via the optional
+      # photocraft-heif and photocraft-jxl crates.
       # `--lib --bins --tests` leaves out the examples, which cargo test would build and link but
       # never run (Clippy's `--all-targets` still checks they compile). nextest skips doctests, so
       # they get their own step.
@@ -190,12 +191,12 @@ jobs:
             integration) targets=(--test '*') ;;
             *) targets=(--lib --bins --tests) ;;
           esac
-          cargo nextest run --profile ci --workspace --locked --features heif "${targets[@]}"
+          cargo nextest run --profile ci --workspace --locked --features heif,jxl "${targets[@]}"
         shell: bash
 
       - name: Doctests
         if: matrix.part == 'all' || matrix.part == 'unit'
-        run: cargo test --workspace --locked --features heif --doc
+        run: cargo test --workspace --locked --features heif,jxl --doc
 
   # The Windows tests used to be one job named `test (windows-latest)`; they're now legs named
   # `test (windows-latest, unit)` and `test (windows-latest, integration)`. This job keeps the old
@@ -254,12 +255,12 @@ jobs:
 
       # The same codecs without the optional decoder: HEIC must stay a clear "not in this build"
       # error for distributors who leave it out.
-      - name: Test without heif
+      - name: Test without heif and jxl
         if: matrix.variant == 'without heif'
-        run: cargo nextest run -p photocraft-heif -p photocraft-codecs -p photocraft-io --locked --profile ci
+        run: cargo nextest run -p photocraft-heif -p photocraft-jxl -p photocraft-codecs -p photocraft-io --locked --profile ci
 
       # The tests built with the optional craft-fonts input (crates/text/build.rs), so the Japanese
-      # font tests that skip without it run. Keep the test job's exact `--workspace --features heif
+      # font tests that skip without it run. Keep the test job's exact `--workspace --features heif,jxl
       # --lib --bins --tests`, so the restored dependencies match and only the workspace rebuilds.
       # Filter execution to the three crates that read the optional font input (#6127).
       - name: Check out craft-fonts
@@ -276,7 +277,7 @@ jobs:
           CRAFT_FONTS_DIR: ${{ github.workspace }}/craft-fonts
           CRAFT_FONTS_REQUIRED: "1"
         run: >-
-          cargo nextest run --profile ci --workspace --locked --features heif --lib --bins --tests
+          cargo nextest run --profile ci --workspace --locked --features heif,jxl --lib --bins --tests
           -E 'package(photocraft-text) | package(photocraft-io) | package(photocraft-ui-egui)'
 
   corpus:
@@ -404,6 +405,7 @@ jobs:
           - { crate: codecs, name: decode_tiff }
           - { crate: codecs, name: decode_exr }
           - { crate: codecs, name: decode_heif }
+          - { crate: codecs, name: decode_jxl }
           - { crate: affinity, name: preview }
           - { crate: affinity, name: import_preview, args: "--features io" }
           - { crate: format, name: load }
