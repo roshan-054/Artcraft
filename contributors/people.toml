@@ -162,3 +162,8 @@ sync_github_name = true
 [people.sidney]
 real_name = "Sidney Markowitz"
 sync_github_name = true
+
+[people.marcoarnulfo]
+real_name = "Marco Arnulfo"
+display_name = "Marco Arnulfo"
+sync_github_name = false
