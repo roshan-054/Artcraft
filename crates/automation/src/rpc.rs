@@ -664,7 +664,7 @@ mod tests {
         let inspected = h.handle("doc.inspect", json!({})).unwrap();
         assert_eq!(inspected["layers"].as_array().map(Vec::len), Some(2), "the placed layer is in the document: {inspected}");
         // A path outside the read root is refused the way the ambient command is (#2810).
-        for (path, reason) in [("../outside/logo.png", "parent traversal"), (absolute.as_str(), "must be inside the automation root")] {
+        for (path, reason) in [("../outside/logo.png", "parent traversal"), (absolute.as_str(), "must be inside an automation read root")] {
             let refused = h.handle("doc.place", json!({"path": path})).unwrap_err().to_string();
             assert!(refused.contains(reason), "{refused}");
             let inspected = h.handle("doc.inspect", json!({})).unwrap();
@@ -750,7 +750,7 @@ mod tests {
         assert_eq!(imported["imported"].as_u64(), Some(2), "{imported}");
         std::fs::write(base.join("outside.csv"), "Data Set,show\none,true\n").unwrap();
         let outside = h.handle("doc.importDataSets", json!({"path": base.join("outside.csv").to_string_lossy()})).unwrap_err().to_string();
-        assert!(outside.contains("must be inside the automation root"), "{outside}");
+        assert!(outside.contains("must be inside an automation read root"), "{outside}");
         // Release directory capabilities before cleanup on Windows.
         drop(h);
         std::fs::remove_dir_all(base).unwrap();
