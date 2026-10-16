@@ -233,9 +233,10 @@ impl PsdFile {
     pub fn to_bytes(&self) -> Result<Vec<u8>> {
         let v = self.header.version;
         let psb = v.is_psb();
-        // Reserve the pixel data up front: appending it to an empty Vec reallocates and copies
-        // repeatedly. Everything else (headers, resources, records) is small by comparison.
-        let hint = self.layer_info.as_ref().map_or(0, LayerInfo::channel_data_len).saturating_add(self.image_data.data.len());
+        // Reserve the whole file up front: appending to an empty Vec reallocates and copies
+        // repeatedly, and a reserve that is a few bytes short makes the last append double the
+        // buffer, copying the whole file once more (2x the file's size, #6607).
+        let hint = self.size_bound();
         let mut out = Vec::new();
         out.try_reserve(hint).map_err(|_| PsdError::LimitExceeded("not enough memory to serialize the file"))?;
         self.header.write(&mut out);
@@ -291,6 +292,26 @@ impl PsdFile {
         out.put_u16(self.image_data.compression.as_u16());
         out.put(&self.image_data.data);
         Ok(out)
+    }
+
+    /// An upper bound of [`Self::to_bytes`]'s length: the pixel data plus every variable-length
+    /// part, each with generous room for its fixed fields, lengths and padding. Saturates.
+    pub(crate) fn size_bound(&self) -> usize {
+        // Per item: signature, key or id, length fields and padding fit easily.
+        const ITEM: usize = 32;
+        let blocks = |b: &[crate::tagged::TaggedBlock]| {
+            b.iter().fold(0usize, |n, t| n.saturating_add(t.data.len()).saturating_add(t.padding.as_ref().map_or(0, Vec::len)).saturating_add(ITEM))
+        };
+        let mut n: usize = 1024; // file header and section lengths
+        n = n.saturating_add(self.color_mode_data.len());
+        n = self.resources.iter().fold(n, |n, r| n.saturating_add(r.data.len()).saturating_add(r.name.len()).saturating_add(ITEM));
+        n = n.saturating_add(self.layer_info.as_ref().map_or(0, LayerInfo::size_bound));
+        n = n.saturating_add(self.global_layer_mask.as_ref().map_or(0, |g| g.data.len()));
+        n = n.saturating_add(blocks(&self.global_blocks)).saturating_add(self.layer_mask_trailing.len());
+        if let LayerInfoPlacement::GlobalBlock { padding: Some(p), .. } = &self.layer_info_placement {
+            n = n.saturating_add(p.len()).saturating_add(ITEM);
+        }
+        n.saturating_add(self.image_data.data.len())
     }
 
     /// Layer records in file order (bottom-most first); empty if none.
@@ -399,6 +420,18 @@ impl PsdFile {
 mod write_tests {
     use super::*;
     use crate::{Compression, testgen};
+
+    /// #6607: the output is allocated once. A reserve a few bytes short of the file made the last
+    /// append double the buffer, copying the whole file once more at the save's peak.
+    #[test]
+    fn serializing_allocates_the_output_once() {
+        for case in testgen::all_cases() {
+            let bound = case.file.size_bound();
+            let bytes = case.file.to_bytes().unwrap();
+            assert!(bytes.len() <= bound, "{}: {} > bound {bound}", case.name, bytes.len());
+            assert_eq!(bytes.capacity(), bound, "{}: the buffer grew past its first allocation", case.name);
+        }
+    }
 
     #[test]
     fn global_blocks_default_to_four_byte_padding() {

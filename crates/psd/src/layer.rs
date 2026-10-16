@@ -743,6 +743,25 @@ impl LayerInfo {
         self.layers.iter().flat_map(|l| &l.channels).filter(|c| c.compression.is_some()).fold(0usize, |n, c| n.saturating_add(2).saturating_add(c.data.len()))
     }
 
+    /// An upper bound of the body's length: the channel data plus every record, each with
+    /// generous room for its fixed fields (rect, blend mode, flags, mask data, lengths).
+    /// Saturates. Reserving it keeps a writer from doubling its buffer at the end (#6607).
+    pub(crate) fn size_bound(&self) -> usize {
+        const RECORD: usize = 256;
+        const ITEM: usize = 32;
+        let n = self.channel_data_len().saturating_add(self.padding.as_ref().map_or(0, Vec::len)).saturating_add(ITEM);
+        self.layers.iter().fold(n, |n, l| {
+            let blocks =
+                l.blocks.iter().fold(0usize, |n, t| n.saturating_add(t.data.len()).saturating_add(t.padding.as_ref().map_or(0, Vec::len)).saturating_add(ITEM));
+            n.saturating_add(RECORD)
+                .saturating_add(l.channels.len().saturating_mul(ITEM))
+                .saturating_add(l.name.len())
+                .saturating_add(l.blending_ranges.data.len())
+                .saturating_add(blocks)
+                .saturating_add(l.extra_trailing.len())
+        })
+    }
+
     /// Serializes the body without any trailing padding (the padding field is ignored).
     pub(crate) fn write_unpadded(&self, out: &mut Vec<u8>, version: Version) -> Result<()> {
         let n = i16::try_from(self.layers.len()).map_err(|_| PsdError::LimitExceeded("more than 32767 layers"))?;
