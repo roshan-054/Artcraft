@@ -700,16 +700,28 @@ fn short_num(v: f64, decimals: usize) -> String {
 }
 
 /// Exposure time as cameras print it: "1/250 s" for fractions of a second, "0.4 s" or "2 s"
-/// when the reciprocal isn't a whole number or the exposure is a second or longer.
+/// otherwise. The `1/n` form uses the nearest whole denominator when it is within 5 % of the
+/// stored value (EXIF often stores 1/32 s as 0.031714 s, not exactly 1/32); exposures that
+/// don't round to a close `1/n` keep three significant digits, so 0.0317 s never shows as "0.03 s".
 fn exposure_text(t: f64) -> Option<String> {
     if !(t.is_finite() && t > 0.0) {
         return None;
     }
-    let r = 1.0 / t;
-    if t < 1.0 && (r - r.round()).abs() <= r * 0.01 {
-        return Some(format!("1/{} s", r.round()));
+    if t < 1.0 {
+        let r = 1.0 / t;
+        let n = r.round();
+        if n >= 2.0 && (r - n).abs() <= n * 0.05 {
+            return Some(format!("1/{n:.0} s"));
+        }
+        return Some(format!("{} s", short_sig(t, 3)));
     }
-    Some(format!("{} s", short_num(t, if t < 1.0 { 2 } else { 1 })))
+    Some(format!("{} s", short_num(t, 1)))
+}
+
+/// `v` with at most `sig` significant digits and no trailing zeros (0.031714 → "0.0317").
+fn short_sig(v: f64, sig: usize) -> String {
+    let decimals = (sig as i32 - 1 - v.abs().log10().floor() as i32).clamp(0, 9) as usize;
+    short_num(v, decimals)
 }
 
 /// EXIF (`2024:02:17 12:40:19`) or XMP (`2024-02-17T12:40:19.00+01:00`) dates as
