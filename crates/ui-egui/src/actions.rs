@@ -343,8 +343,21 @@ pub fn load_bytes(app: &mut PhotocraftApp, name: &str, bytes: &[u8]) -> Result<V
     Ok(r)
 }
 
+fn actions_directory(app: &PhotocraftApp) -> Option<String> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        crate::actions_folder::directory(app)
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = app;
+        None
+    }
+}
+
 fn load_dialog(app: &mut PhotocraftApp) -> Result<Value, String> {
-    app.pick_file_bytes_filtered(&["atn"], |app, name, bytes| load_bytes(app, &name, &bytes))
+    let folder = actions_directory(app);
+    app.pick_file_bytes_in(&["atn"], folder, |app, name, bytes| load_bytes(app, &name, &bytes))
 }
 
 /// Save Actions…: the selected action's set (every action of it), or every action when none
@@ -360,6 +373,7 @@ fn save_dialog(app: &mut PhotocraftApp, set: Option<String>) -> Result<Value, St
     let n = r["actions"].as_array().map_or(0, Vec::len) as u64;
     let skipped = r["skipped"].as_array().map_or(0, Vec::len);
     let file = format!("{}.atn", r["set"].as_str().unwrap_or("Actions"));
+    let file = actions_directory(app).map(|dir| std::path::Path::new(&dir).join(&file).to_string_lossy().into_owned()).unwrap_or(file);
     app.pick_save(&file, move |app, path| {
         let write = app.services.write.as_mut().ok_or("no writer configured")?;
         write(&path, &bytes)?;
@@ -471,6 +485,31 @@ pub fn panel_menu(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let any = !app.session.actions.list.is_empty();
     if ui.add_enabled(any, egui::Button::new(tl!("Save Actions…"))).clicked() {
         act = Some("save");
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let files = crate::actions_folder::files(app).to_vec();
+        if !files.is_empty() {
+            let mut picked = None;
+            ui.menu_button(tl!("Actions Folder"), |ui| {
+                egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
+                    for path in &files {
+                        if ui.button(crate::file_open::display_name(path)).clicked() {
+                            picked = Some(path.clone());
+                            ui.close();
+                        }
+                    }
+                });
+            });
+            if let Some(path) = picked {
+                ui.close();
+                if let Err(error) = load_bytes(app, &path, &[]) {
+                    app.ui.status = error;
+                    app.ui.status_error = true;
+                }
+                return;
+            }
+        }
     }
     ui.separator();
     let selected = app.ui.actions.selected.is_some_and(|i| i < app.session.actions.list.len());
@@ -987,6 +1026,50 @@ pub fn panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn actions_folder_is_used_for_both_file_pickers_and_survives_preferences() {
+        use crate::file_dialog::{FileDialogRequest, fake};
+        let dir = std::env::temp_dir().join(format!(
+            "photocraft-actions-pickers-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        std::fs::create_dir(&dir).unwrap();
+        let path = dir.to_string_lossy().to_string();
+        let (dialog, asked) = fake(vec![None, None]);
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services { file_dialog: Some(dialog), ..Default::default() });
+        app.run("prefs.set", json!({"path":"fileHandling.actionsFolder", "value":path})).unwrap();
+        let saved = serde_json::to_value(app.session.prefs()).unwrap();
+        let loaded: photocraft_engine::prefs::Preferences = serde_json::from_value(saved).unwrap();
+        assert_eq!(loaded.file_handling.actions_folder, path);
+        let old: photocraft_engine::prefs::Preferences = serde_json::from_value(json!({})).unwrap();
+        assert!(old.file_handling.actions_folder.is_empty());
+        let ctx = egui::Context::default();
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            crate::actions_folder::tick(&mut app, &ctx);
+            if actions_directory(&app).is_some() {
+                break;
+            }
+            assert!(std::time::Instant::now() < until);
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        load_dialog(&mut app).unwrap();
+        app.poll_file_dialog(&ctx, None);
+        app.poll_file_dialog(&ctx, None);
+        assert!(matches!(&asked.borrow()[0], FileDialogRequest::Open {initial_dir:Some(d), extensions:Some(ext), ..} if d == &path && ext == &["atn"]));
+        app.session.actions.list.push(Action { name: "Empty".into(), ..Default::default() });
+        save_dialog(&mut app, None).unwrap();
+        app.poll_file_dialog(&ctx, None);
+        app.poll_file_dialog(&ctx, None);
+        assert!(matches!(&asked.borrow()[1], FileDialogRequest::Save {suggested} if std::path::Path::new(suggested).parent() == Some(dir.as_path())));
+        app.run("prefs.set", json!({"path":"fileHandling.actionsFolder", "value":dir.join("missing").to_string_lossy()})).unwrap();
+        crate::actions_folder::tick(&mut app, &ctx);
+        assert!(actions_directory(&app).is_none());
+        std::fs::remove_dir(dir).unwrap();
+    }
 
     #[test]
     fn selected_layer_name_is_visible_during_recording_and_after_stop() {

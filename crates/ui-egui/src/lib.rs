@@ -15,6 +15,8 @@ macro_rules! tl {
 }
 
 pub mod actions;
+#[cfg(not(target_arch = "wasm32"))]
+mod actions_folder;
 pub mod adjust_dialog;
 pub mod adjust_editors;
 pub mod adjust_preview;

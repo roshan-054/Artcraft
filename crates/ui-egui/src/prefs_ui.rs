@@ -53,6 +53,8 @@ pub struct Runtime {
     /// Tool options as last remembered in the preferences (see `tool_memory`).
     pub(crate) tool_options: Option<crate::state::ToolOptions>,
     pub(crate) selected_tool: Option<crate::state::Tool>,
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) actions_folder: crate::actions_folder::Runtime,
 }
 
 /// The GPU canvas colours from Preferences › Transparency & Gamut.
@@ -447,6 +449,8 @@ pub fn tick(app: &mut PhotocraftApp, ctx: &egui::Context) {
     sync_appearance(app, ctx);
     crate::theme::set_ui_font_size(ctx, app.session.prefs().interface.ui_font_size);
     presets_store(app);
+    #[cfg(not(target_arch = "wasm32"))]
+    crate::actions_folder::tick(app, ctx);
     sync_tooltips(app, ctx);
     sync_animations(app, ctx);
     app.sync_recent();
@@ -992,7 +996,11 @@ pub fn open_preferences(app: &mut PhotocraftApp, section: &str) -> u64 {
     let section = if SECTIONS.iter().any(|(id, _)| *id == section) { section } else { "general" };
     let working = preference_values(app.session.prefs());
     let order = field_order(app.session.prefs(), &working);
-    open_kind(app, "prefs", "Preferences", json!({"section": section, "values": working, "__order": order}))
+    let id = open_kind(app, "prefs", "Preferences", json!({"section": section, "values": working, "__order": order}));
+    if let Some(dialog) = app.ui.dialog_mut(id) {
+        dialog.fields.insert("__prefsDialogId".into(), json!(id));
+    }
+    id
 }
 
 /// Each section's keys in declaration order (JSON objects sort their keys; the serialised text
@@ -1058,6 +1066,8 @@ pub fn body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Valu
             f.insert("__gpuInfo".into(), json!(info));
             let system = system_theme(app, ui.ctx());
             prefs_body(ui, f, system);
+            #[cfg(not(target_arch = "wasm32"))]
+            crate::actions_folder::preferences(app, ui, f);
         }
         "shortcuts" => shortcuts_body(app, ui, f),
         "presets" => presets_body(app, ui, f),
@@ -1564,6 +1574,7 @@ fn field_visible(section: &str, obj: &Map<String, Value>, k: &str, query: &str) 
         || (section == "performance" && matches!(k, "useGpu" | "gpuBackend" | "renderingMode"))
         // The browser presents frames itself: Low-Latency Drawing does nothing there.
         || (cfg!(target_arch = "wasm32") && path == "performance.lowLatencyDrawing")
+        || (cfg!(target_arch = "wasm32") && path == "fileHandling.actionsFolder")
         || (section == "export" && !export_field_visible(obj, k))
         || (section == "tools" && !tools_field_visible(obj, k));
     (query.is_empty() || preference_matches(section, k, query))
@@ -1649,6 +1660,10 @@ fn field_rows(ui: &mut egui::Ui, section: &str, obj: &mut Map<String, Value>, ke
                 });
                 obj.insert(k, json!(format!("#{:02x}{:02x}{:02x}", rgb[0], rgb[1], rgb[2])));
                 let _ = color_of(s);
+            }
+            #[cfg(not(target_arch = "wasm32"))]
+            Value::String(s) if path == "fileHandling.actionsFolder" => {
+                crate::actions_folder::field(ui, obj, s);
             }
             Value::String(s) => {
                 ui.label(RichText::new(tl!(&label)).color(t.text_dim));

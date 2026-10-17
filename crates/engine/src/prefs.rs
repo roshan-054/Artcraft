@@ -458,6 +458,8 @@ pub struct FileHandling {
     pub recent_file_count: u32,
     /// Most recently opened files, newest first (File › Open Recent).
     pub recent_files: Vec<String>,
+    /// Discovery folder for Photoshop action sets; the stored action library stays in Presets.
+    pub actions_folder: String,
 }
 
 impl Default for FileHandling {
@@ -476,6 +478,7 @@ impl Default for FileHandling {
             rasterize_svg_groups_deeper_than: photocraft_doc::MAX_GROUP_DEPTH as u32,
             recent_file_count: 20,
             recent_files: Vec::new(),
+            actions_folder: String::new(),
         }
     }
 }
