@@ -189,6 +189,7 @@ impl Session {
             custom_shapes: take(&mut m, "custom_shapes"),
             layer_defaults: take(&mut m, "layer_defaults"),
             swatches: take(&mut m, "swatches"),
+            export_presets: take(&mut m, "export_presets"),
         };
         let st = &mut self.presets;
         if let Some(g) = p.gradients {
