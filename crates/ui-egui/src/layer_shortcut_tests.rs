@@ -122,3 +122,23 @@ fn alt_click_on_a_layer_thumbnail_fits_the_layer() {
     assert_eq!(v.center, [310.0, 205.0], "centred on the layer's content");
     assert!(v.zoom > before.zoom * 4.0, "zoomed in on 20 × 10 px: {} -> {}", before.zoom, v.zoom);
 }
+
+/// #6827: a custom binding on PageUp/PageDown fires (it was saved as `Pageup`, which matched no
+/// key), and one saved that way by an earlier version still parses.
+#[test]
+fn custom_page_up_and_page_down_bindings_fire() {
+    for (binding, key, modifiers) in [
+        ("Shift+PageUp", Key::PageUp, Modifiers::SHIFT),
+        ("Cmd+Shift+PageUp", Key::PageUp, Modifiers::COMMAND | Modifiers::SHIFT),
+        ("Cmd+Alt+PageDown", Key::PageDown, Modifiers::COMMAND | Modifiers::ALT),
+    ] {
+        let mut app = app();
+        app.run("edit.fill", json!({"contents": "black"})).unwrap();
+        app.run("edit.keyboardShortcuts", json!({"set": {"edit.transform.flipHorizontal": binding}, "removeConflicts": true})).unwrap();
+        let before = app.session.journal.len();
+        press(&mut app, key, modifiers);
+        let ran: Vec<&str> = app.session.journal[before..].iter().map(|(id, _)| id.as_str()).collect();
+        assert_eq!(ran, ["edit.transform.flipHorizontal"], "{binding}");
+    }
+    assert_eq!(crate::shortcuts::parse("Shift+Pageup"), Some(egui::KeyboardShortcut::new(Modifiers::SHIFT, Key::PageUp)));
+}
