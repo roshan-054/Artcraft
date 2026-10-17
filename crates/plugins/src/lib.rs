@@ -10,8 +10,8 @@
 //! - a **linear-memory cap**, a **recursion-depth cap** and wasmi's strict module limits;
 //! - a **fresh instance per band**, so no state leaks between calls.
 //!
-//! Every failure (malformed module, trap, exhausted budget, bad output) is an [`Error`]; nothing
-//! a module does can panic or hang the host.
+//! Malformed modules, traps, exhausted budgets and bad output return an [`Error`]. These
+//! per-instance bounds do not impose a process-wide memory quota or rule out runtime defects.
 //!
 //! Pixels are handed over as interleaved, normalised `f32` samples in the document's own colour
 //! model (bit-depth and colour-mode agnostic), in horizontal bands so the copy stays bounded.
@@ -21,6 +21,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 mod apply;
+pub mod extension;
 pub mod manifest;
 pub mod registry;
 mod runtime;

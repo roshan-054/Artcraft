@@ -363,6 +363,18 @@ fn preference_uses_ambient_filesystem(path: &str) -> bool {
 
 fn command_uses_ambient_path(id: &str, params: &Value) -> bool {
     match id {
+        "extension.install"
+        | "extension.updates.check"
+        | "extension.updates.prepare"
+        | "extension.rollback"
+        | "extension.runtime"
+        | "extension.enable"
+        | "extension.remove"
+        | "plugin.processImage"
+        | "plugin.runTask"
+        | "image.pluginPreview.apply"
+        | "image.pluginPreview.discard" => true,
+        "extension.inspect" => params.get("data").is_none() && params.get("path").is_some(),
         "actions.load" | "brush.presets.importAbr" | "brush.presets.importImage" | "gradient.presets.importGrd" | "plugin.install" | "swatches.import" => {
             // `data` wins over `path` in these commands; any `path` without it reads the filesystem.
             params.get("data").is_none() && params.get("path").is_some()
@@ -841,6 +853,28 @@ mod tests {
             .map(|spec| spec.id)
             .collect();
         assert!(unclassified.is_empty(), "filesystem path parameters in the command registry need an automation policy: {unclassified:?}");
+    }
+
+    #[test]
+    fn extension_management_does_not_bypass_automation_filesystem_authority() {
+        for id in [
+            "extension.install",
+            "extension.updates.check",
+            "extension.updates.prepare",
+            "extension.rollback",
+            "extension.runtime",
+            "extension.enable",
+            "extension.remove",
+            "plugin.processImage",
+            "plugin.runTask",
+            "image.pluginPreview.apply",
+            "image.pluginPreview.discard",
+        ] {
+            assert!(authorize_engine_command(id, &serde_json::json!({"data":"AA==","id":"org.example.tools","enabled":true})).is_err(), "{id}");
+        }
+        assert!(authorize_engine_command("extension.inspect", &serde_json::json!({"path":"/outside/tools.pcext"})).is_err());
+        assert!(authorize_engine_command("extension.inspect", &serde_json::json!({"data":"AA=="})).is_ok());
+        assert!(authorize_engine_command("extension.invoke", &serde_json::json!({"id":"org.example.tools","event":"apply"})).is_ok());
     }
 
     fn documents_filesystem_path_params(id: &str, params: &str) -> bool {

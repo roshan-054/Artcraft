@@ -377,6 +377,16 @@ RISC-V (riscv64): `photocraft-<ver>-linux-riscv64.tar.gz` only, built against Ub
 |---|---|---|
 | Static site | `photocraft-web-<ver>.zip` | Runs in a modern browser; host it on any static server |
 
+## Plugin developers
+
+The [plugin developer handbook](docs/plugin-development.md) covers independent native-panel
+tools and custom WebAssembly pixel filters, with neutral source starters, a command reference,
+testing steps and packaging limits. Start with the [panel starter](examples/extensions/plugin-starter)
+or [filter starter](examples/plugins/filter-starter); neither depends on another plugin.
+
+See the [plugin platform changelog](docs/plugin-changelog.md) for integration changes and
+compatibility notes.
+
 ## The Crafting Apps
 
 PhotoCraft is one of the **Crafting Apps**: free, open-source creative tools from the

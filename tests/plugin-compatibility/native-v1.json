@@ -1,0 +1,17 @@
+{
+  "imageInvocation": ["--job", "<host-owned job.json>"],
+  "imageJob": {
+    "apiVersion": 1,
+    "input": "<host-owned source.png>",
+    "output": "<host-owned result.png>",
+    "options": {"gain": 0.5},
+    "outputSize": {"width": 8, "height": 6},
+    "colorSpace": "srgb"
+  },
+  "taskInvocation": ["--task", "<host-owned task.json>"],
+  "taskJob": {"apiVersion": 1, "options": {}, "output": "<host-owned result.json>"},
+  "taskResult": {"apiVersion": 1, "message": "Ready", "data": {"ready": true}},
+  "progressStderrLine": "{\"progress\":50,\"message\":\"Processing\"}\n",
+  "cancelStdinBytes": "cancel\n",
+  "imageResult": "8-bit RGB or RGBA PNG at requested dimensions, interpreted as sRGB"
+}

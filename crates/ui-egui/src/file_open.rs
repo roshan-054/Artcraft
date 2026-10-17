@@ -59,6 +59,20 @@ fn dropped_name(f: &egui::DroppedFileHandle) -> String {
     f.path().file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "dropped".into())
 }
 
+/// Plugin packages go to the installer even over a canvas. Other files belong to the manager
+/// only when dropped over its window (or when the platform cannot supply a pointer position).
+fn plugin_drop_target(files: &[egui::DroppedFileHandle], manager_open: bool, manager_rect: Option<egui::Rect>, at: Option<egui::Pos2>) -> bool {
+    if files.is_empty() {
+        return false;
+    }
+    files.iter().any(|f| {
+        f.path()
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("pcplugin") || extension.eq_ignore_ascii_case("pcext"))
+    }) || (manager_open && at.is_none_or(|position| manager_rect.is_some_and(|rect| rect.contains(position))))
+}
+
 /// The file name of `path` (the document's display name), or `path` itself when it has none.
 pub fn display_name(path: &str) -> String {
     std::path::Path::new(path).file_name().map(|n| n.to_string_lossy().to_string()).filter(|n| !n.is_empty()).unwrap_or_else(|| path.to_string())
@@ -170,6 +184,12 @@ impl PhotocraftApp {
     /// Preset files (brushes, gradients) always go to their libraries. Native drops carry an
     /// absolute path, read in bounded reads (#375) rather than egui's whole-file read.
     pub fn open_dropped(&mut self, ctx: &egui::Context, files: Vec<egui::DroppedFileHandle>, at: Option<egui::Pos2>) {
+        // Review the whole drop before changing document state. In particular, a plugin dropped
+        // on a canvas must neither commit its current transform nor enter the place queue.
+        if plugin_drop_target(&files, self.ui.extensions.manager_open, self.ui.extensions.drop_rect, at) {
+            let _ = crate::extension_ui::review_drop(self, &files);
+            return;
+        }
         let target = self.drop_target(ctx, at);
         let mut slot = match target {
             DropTarget::Tabs(slot) => Some(slot),

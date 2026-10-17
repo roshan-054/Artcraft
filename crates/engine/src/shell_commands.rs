@@ -7,6 +7,7 @@
 
 /// Shell commands: id, label, menu path, default shortcut.
 pub const SHELL_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
+    ("window.extensions", "Manage Plugins…", &["Plugins"], None),
     ("ui.symmetryTransform", "Transform Symmetry", &[], None),
     // Right-click the options bar's tool icon (#2825); `tool.resetAll` asks first.
     ("tool.reset", "Reset Tool", &[], None),
@@ -190,5 +191,17 @@ mod tests {
         }
         assert_eq!(tool_default("tools.select.move"), Some(Some("V")));
         assert_eq!(tool_default("edit.copy"), None);
+    }
+
+    #[test]
+    fn plugin_manager_shortcut_import_works_without_the_ui() {
+        let set = crate::kys::KysSet {
+            commands: vec![crate::kys::KysCommand { name: "Manage Plugins…".into(), shortcuts: vec!["Cmd+Alt+P".into()], ..Default::default() }],
+            ..Default::default()
+        };
+        let plan = crate::kys::plan(crate::kys::command_candidates(), &set);
+        assert!(plan.unknown.is_empty());
+        assert!(plan.unreadable.is_empty());
+        assert_eq!(plan.set.get("window.extensions").map(String::as_str), Some("Cmd+Alt+P"));
     }
 }

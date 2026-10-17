@@ -424,6 +424,87 @@ fn history_steps(app: &PhotocraftApp) -> usize {
     app.session.active().unwrap().history.past_len()
 }
 
+#[test]
+fn plugin_drop_routing_recognizes_packages_without_stealing_other_canvas_drops() {
+    let rect = egui::Rect::from_min_max(egui::pos2(700.0, 50.0), egui::pos2(950.0, 500.0));
+    let canvas = Some(egui::pos2(400.0, 300.0));
+    let manager = Some(rect.center());
+    for name in ["plugin.pcplugin", "plugin.PCPLUGIN", "panel.pcext", "panel.PcExT"] {
+        let files = [dropped(name, Ok(Vec::new()))];
+        assert!(plugin_drop_target(&files, false, None, canvas), "{name}");
+        assert!(plugin_drop_target(&files, true, Some(rect), canvas), "{name}");
+    }
+    for name in ["photo.png", "brush.abr", "panel.wasm", "plugin.pcplugin.png", "no-extension"] {
+        let files = [dropped(name, Ok(Vec::new()))];
+        assert!(!plugin_drop_target(&files, false, Some(rect), manager), "closed manager: {name}");
+        assert!(!plugin_drop_target(&files, true, Some(rect), canvas), "outside manager: {name}");
+        assert!(plugin_drop_target(&files, true, Some(rect), manager), "over manager: {name}");
+        assert!(plugin_drop_target(&files, true, None, None), "unknown pointer: {name}");
+        assert!(!plugin_drop_target(&files, true, None, canvas), "manager not yet shown: {name}");
+    }
+    assert!(!plugin_drop_target(&[], true, Some(rect), manager));
+}
+
+#[test]
+fn plugin_drops_on_canvas_leave_the_current_place_transform_untouched() {
+    let ctx = egui::Context::default();
+    let at = Some(egui::pos2(400.0, 300.0));
+    for name in ["plugin.PCPLUGIN", "panel.PCEXT"] {
+        let mut app = app_with_canvas();
+        app.open_dropped(&ctx, vec![dropped("first.png", Ok(png_bytes(4, 4)))], at);
+        app.place_next_dropped(&ctx);
+        let transform = app.ui.transform.clone();
+        assert!(transform.is_some());
+        let doc = app.session.active().unwrap().doc.clone();
+        let history = history_steps(&app);
+        app.open_dropped(&ctx, vec![dropped(name, Ok(b"invalid plugin".to_vec()))], at);
+        assert!(app.ui.extensions.manager_open, "{name}");
+        assert_eq!(app.ui.transform, transform, "review must not commit Free Transform: {name}");
+        assert!(std::sync::Arc::ptr_eq(&app.session.active().unwrap().doc, &doc));
+        assert_eq!(history_steps(&app), history);
+        assert!(app.drop_places.is_empty());
+        assert!(app.session.extensions.installed.is_empty());
+        assert_eq!(app.session.documents().len(), 1);
+    }
+}
+
+#[test]
+fn mixed_plugin_and_image_drops_are_reviewed_as_one_batch() {
+    let ctx = egui::Context::default();
+    let mut app = app_with_canvas();
+    let before = layer_count(&app);
+    app.open_dropped(
+        &ctx,
+        vec![dropped("photo.png", Ok(b"x".to_vec())), dropped("plugin.pcext", Ok(b"invalid plugin".to_vec()))],
+        Some(egui::pos2(400.0, 300.0)),
+    );
+    assert!(app.ui.extensions.manager_open);
+    assert_eq!(app.session.documents().len(), 1);
+    assert_eq!(layer_count(&app), before);
+    assert!(app.drop_places.is_empty());
+    assert!(app.ui.transform.is_none());
+    assert!(app.session.extensions.installed.is_empty());
+}
+
+#[test]
+fn images_over_plugin_manager_are_rejected_but_canvas_drops_still_place() {
+    let ctx = egui::Context::default();
+    let mut app = app_with_canvas();
+    let before = layer_count(&app);
+    let rect = egui::Rect::from_min_max(egui::pos2(700.0, 50.0), egui::pos2(950.0, 500.0));
+    app.ui.extensions.manager_open = true;
+    app.ui.extensions.drop_rect = Some(rect);
+    app.open_dropped(&ctx, vec![dropped("photo.png", Ok(b"x".to_vec()))], Some(rect.center()));
+    assert_eq!(app.session.documents().len(), 1);
+    assert_eq!(layer_count(&app), before);
+    assert!(app.drop_places.is_empty());
+    app.open_dropped(&ctx, vec![dropped("photo.png", Ok(png_bytes(2, 2)))], Some(egui::pos2(400.0, 300.0)));
+    app.place_next_dropped(&ctx);
+    assert_eq!(app.session.documents().len(), 1);
+    assert_eq!(layer_count(&app), before + 1);
+    assert!(app.ui.transform.is_some());
+}
+
 /// As in the reference app, files dropped on the canvas are placed one at a time, each in Free
 /// Transform; the next is placed once the previous transform is committed or cancelled.
 #[test]

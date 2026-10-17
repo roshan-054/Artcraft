@@ -6,6 +6,8 @@
 # No proprietary translation resources were consulted or extracted.
 # Licensed MIT OR Apache-2.0. See LICENSE-translations.txt and ATTRIBUTION.md.
 # Product names and technology names retain their spelling.
+	Automatic update checks	자동 업데이트 확인
+	Last update check unix secs	마지막 업데이트 확인 Unix 시간(초)
 
 # Channel Options and New Spot Channel (#3761)
 	Channel Color	채널 색상
@@ -3377,6 +3379,15 @@ curves	Smooth	매끄럽게
 # Free Transform: a new layer while the box is open (#5859)
 	Free Transform is still being applied; try again when it has finished.	자유 변형을 아직 적용하는 중입니다. 완료된 후 다시 시도하세요.
 	The transform couldn't be applied.	변형을 적용할 수 없습니다.
+
+# Native-panel extensions
+	Manage Extensions…	확장 기능 관리…
+	Extensions	확장 기능
+
+# Plugins menu
+	Plugins	플러그인
+	Manage Plugins…	플러그인 관리…
+
 # Preferences › Performance › GPU Memory; the status bar and slow-redraw notice
 	Its layers need {needed} of GPU memory; the budget leaves them {budget}.	레이어에 GPU 메모리 {needed}가 필요하지만 예산은 {budget}만 남겨 둡니다.
 	Set GPU Memory in Preferences › Performance to what your graphics card can hold, at most 3/8 of its memory. Automatic follows Memory Usage, within a quarter of this computer's memory and 3/8 of the card's, and doesn't count the document against a card whose memory is known. The status bar shows GPU Memory Full while they don't fit.	환경 설정 › 성능에서 GPU 메모리를 그래픽 카드가 감당할 수 있는 양으로 설정하세요(최대 카드 메모리의 3/8). 자동은 메모리 사용량을 따르며, 이 컴퓨터 메모리의 4분의 1과 카드 메모리의 3/8 이내이고, 메모리를 알 수 있는 카드에서는 문서를 차감하지 않습니다. 맞지 않는 동안 상태 표시줄에 GPU 메모리 부족이 표시됩니다.

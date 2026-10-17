@@ -2,6 +2,8 @@
 # Columns separated by TAB: context, English source, Greek translation.
 # Original translations based on general Greek graphics/computing terminology.
 # Covers every source label the i18n coverage check lists.
+	Automatic update checks	Αυτόματος έλεγχος ενημερώσεων
+	Last update check unix secs	Τελευταίος έλεγχος ενημερώσεων σε δευτερόλεπτα Unix
 
 # Channel Options and New Spot Channel (#3761)
 	Channel Color	Χρώμα καναλιού
@@ -3899,6 +3901,14 @@ curves	Smooth	Εξομάλυνση
 # Free Transform: a new layer while the box is open (#5859)
 	Free Transform is still being applied; try again when it has finished.	Ο Ελεύθερος μετασχηματισμός εφαρμόζεται ακόμη· δοκιμάστε ξανά όταν ολοκληρωθεί.
 	The transform couldn't be applied.	Δεν ήταν δυνατή η εφαρμογή του μετασχηματισμού.
+
+# Native-panel extensions
+	Manage Extensions…	Διαχείριση επεκτάσεων…
+
+# Plugins menu
+	Plugins	Πρόσθετα
+	Manage Plugins…	Διαχείριση πρόσθετων…
+
 # Preferences › Performance › GPU Memory; the status bar and slow-redraw notice
 	Its layers need {needed} of GPU memory; the budget leaves them {budget}.	Τα επίπεδά του χρειάζονται {needed} μνήμης GPU· το όριο τους αφήνει {budget}.
 	Set GPU Memory in Preferences › Performance to what your graphics card can hold, at most 3/8 of its memory. Automatic follows Memory Usage, within a quarter of this computer's memory and 3/8 of the card's, and doesn't count the document against a card whose memory is known. The status bar shows GPU Memory Full while they don't fit.	Ορίστε τη Μνήμη GPU στις Προτιμήσεις › Επιδόσεις σε όσο χωράει η κάρτα γραφικών σας, το πολύ στα 3/8 της μνήμης της. Το Αυτόματο ακολουθεί τη Χρήση μνήμης, εντός του ενός τετάρτου της μνήμης αυτού του υπολογιστή και των 3/8 της κάρτας, και δεν χρεώνει το έγγραφο σε κάρτα με γνωστή μνήμη. Όσο δεν χωρούν, η γραμμή κατάστασης δείχνει Η μνήμη GPU είναι πλήρης.

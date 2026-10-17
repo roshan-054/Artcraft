@@ -69,13 +69,14 @@ impl std::fmt::Debug for Plugin {
 
 /// When a run must stop: a wall-clock deadline (native) and a flag shared by parallel bands.
 #[derive(Clone)]
-pub(crate) struct Deadline {
+pub(crate) struct Deadline<'a> {
     #[cfg(not(target_arch = "wasm32"))]
     at: std::time::Instant,
     abort: Arc<Mutex<Option<Error>>>,
+    interrupt: photocraft_raster::Interrupt<'a>,
 }
 
-impl Deadline {
+impl<'a> Deadline<'a> {
     pub(crate) fn new(limits: &Limits) -> Self {
         #[cfg(target_arch = "wasm32")]
         let _ = limits;
@@ -83,7 +84,11 @@ impl Deadline {
             #[cfg(not(target_arch = "wasm32"))]
             at: std::time::Instant::now() + std::time::Duration::from_millis(limits.wall_time_ms),
             abort: Arc::new(Mutex::new(None)),
+            interrupt: photocraft_raster::Interrupt::NONE,
         }
+    }
+    pub(crate) fn with_interrupt(limits: &Limits, interrupt: photocraft_raster::Interrupt<'a>) -> Self {
+        Self { interrupt, ..Self::new(limits) }
     }
     pub(crate) fn abort(&self, error: Error) {
         // Publish the cause with the cancellation state so siblings cannot replace it with a
@@ -91,6 +96,11 @@ impl Deadline {
         self.abort.lock().unwrap_or_else(std::sync::PoisonError::into_inner).get_or_insert(error);
     }
     fn check(&self) -> Result<()> {
+        if self.interrupt.cancelled() {
+            let error = Error::Failed("cancelled".into());
+            self.abort(error.clone());
+            return Err(error);
+        }
         if let Some(error) = self.abort.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone() {
             return Err(error);
         }

@@ -1,0 +1,21 @@
+[package]
+name = "photocraft-plugin"
+description = "PhotoCraft plugin conformance, standalone export builds and package validation"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+photocraft-engine.workspace = true
+photocraft-format.workspace = true
+photocraft-plugins.workspace = true
+photocraft-plugin-sdk = { workspace = true, features = ["authoring"] }
+serde_json.workspace = true
+blake3 = { version = "1.8", default-features = false, features = ["pure"] }
+sha2 = "0.10"
+
+[dev-dependencies]
+tempfile = "3"

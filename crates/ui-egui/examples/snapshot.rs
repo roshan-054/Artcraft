@@ -11,6 +11,10 @@
 //! `--safe-gpu` draws the canvas on the CPU path, like the app's `--safe-gpu` launch.
 //! `--wayland-notice` previews the native file drag-and-drop guidance shown in Wayland sessions.
 //! `--custom-titlebar` draws the Windows/Linux title bar (caption buttons in the top bar).
+//! `--extension FILE --extension-store DIR` installs a plugin into a scratch store for the
+//! capture. Use a temporary directory, never the user's settings. Native packages are trusted
+//! by this developer-only fixture loader; the normal installer always reviews their access.
+//! `--extension-values JSON` sets validated panel fields by installed plugin id for a capture.
 //!
 //! `--monitor 1366x768 --window-top 31` simulates the display the window is on (in points) and
 //! where its content starts on it, e.g. a window running under a Windows taskbar.
@@ -60,6 +64,18 @@ fn main() {
         ..Default::default()
     };
     let open = arg(&args, "--open");
+    let extension = arg(&args, "--extension");
+    let extension_store = arg(&args, "--extension-store");
+    let extension_values: std::collections::BTreeMap<String, Value> = match arg(&args, "--extension-values") {
+        Some(raw) => match (raw.len() <= 64 * 1024).then(|| serde_json::from_str(&raw).ok()).flatten() {
+            Some(values) => values,
+            _ => {
+                eprintln!("--extension-values must be a JSON object of plugin ids and field values, at most 64 KiB");
+                std::process::exit(2);
+            }
+        },
+        None => Default::default(),
+    };
     let safe_gpu = args.iter().any(|a| a == "--safe-gpu");
     // `--background-jobs`: long commands run as background jobs, as in the desktop app (#210).
     let background_jobs = args.iter().any(|a| a == "--background-jobs");
@@ -73,6 +89,20 @@ fn main() {
             services.is_wayland = wayland_notice;
             services.xwayland_command = wayland_notice.then(|| "WAYLAND_DISPLAY= photocraft".into());
             let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), services);
+            if let Some(path) = &extension_store {
+                app.session.extensions.attach_folder(std::path::PathBuf::from(path)).expect("attach --extension-store scratch folder");
+            }
+            if let Some(path) = &extension {
+                app.run("extension.install", serde_json::json!({"path": path, "allowNative": true, "replace": true})).expect("install --extension file");
+            }
+            for (id, values) in &extension_values {
+                let values = app.session.extensions.installed.get(id).and_then(|installed| installed.extension.manifest.values(values).ok());
+                let Some(values) = values else {
+                    eprintln!("--extension-values names an unavailable plugin or invalid fields: {id}");
+                    std::process::exit(2);
+                };
+                app.ui.extensions.panels.entry(id.clone()).or_default().values = Value::Object(values);
+            }
             app.background_jobs = background_jobs;
             app.custom_titlebar = custom_titlebar;
             // `--safe-gpu`: the CPU canvas, as the desktop app's `--safe-gpu` launch.

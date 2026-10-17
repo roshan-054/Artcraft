@@ -1,0 +1,13 @@
+{
+  "id": "org.example.channel-gain",
+  "name": "Channel Gain",
+  "version": "1.0.0",
+  "kind": "filter",
+  "author": "Example author",
+  "description": "Multiply RGB or grayscale color samples while preserving alpha.",
+  "params": {
+    "gain": {"type": "number", "min": 0, "max": 2, "default": 1.25}
+  },
+  "overlap": 0,
+  "area": "content"
+}

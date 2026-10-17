@@ -14,6 +14,8 @@
 # resource, string table or product UI was consulted or copied; add entries the same way.
 # Product and technology names (PhotoCraft, ArtCraft, OpenType, CMYK, Lab ...) stay in Latin
 # letters; the trailing "…" of dialog commands is kept.
+	Automatic update checks	更新を自動確認
+	Last update check unix secs	最終更新確認の Unix 時刻（秒）
 
 # Channel Options and New Spot Channel (#3761)
 	Channel Color	チャンネルカラー
@@ -3875,6 +3877,14 @@ curves	Smooth	スムーズ
 # Free Transform: a new layer while the box is open (#5859)
 	Free Transform is still being applied; try again when it has finished.	自由変形を適用中です。完了してからもう一度お試しください。
 	The transform couldn't be applied.	変形を適用できませんでした。
+
+# Native-panel extensions
+	Manage Extensions…	拡張機能を管理…
+
+# Plugins menu
+	Plugins	プラグイン
+	Manage Plugins…	プラグインを管理…
+
 # Preferences › Performance › GPU Memory; the status bar and slow-redraw notice
 	Its layers need {needed} of GPU memory; the budget leaves them {budget}.	レイヤーには {needed} の GPU メモリが必要ですが、予算で使えるのは {budget} です。
 	Set GPU Memory in Preferences › Performance to what your graphics card can hold, at most 3/8 of its memory. Automatic follows Memory Usage, within a quarter of this computer's memory and 3/8 of the card's, and doesn't count the document against a card whose memory is known. The status bar shows GPU Memory Full while they don't fit.	環境設定 › パフォーマンスの GPU メモリを、グラフィックカードが保持できる量（最大でメモリの 3/8）に設定してください。自動はメモリ使用量に従い、このコンピューターのメモリの4分の1とカードの 3/8 の範囲内で、メモリ量がわかるカードではドキュメント分を差し引きません。収まらない間、ステータスバーに「GPU メモリ不足」と表示されます。

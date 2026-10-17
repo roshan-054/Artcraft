@@ -197,6 +197,22 @@ jobs:
         if: matrix.part == 'all' || matrix.part == 'unit'
         run: cargo test --workspace --locked --features heif --doc
 
+      - name: Plugin API schema contracts
+        if: matrix.part == 'all' || matrix.part == 'integration'
+        run: cargo test -p photocraft-plugin-api -p photocraft-plugin-sdk --locked --features photocraft-plugin-api/schema,photocraft-plugin-sdk/authoring
+
+      - uses: actions/setup-python@v6
+        if: matrix.part == 'all' || matrix.part == 'integration'
+        with:
+          python-version: '3.12'
+
+      - name: Independent plugin integration
+        if: matrix.part == 'all' || matrix.part == 'integration'
+        run: |
+          rustup target add wasm32-unknown-unknown
+          python scripts/plugins/test-platform-examples.py --self-test
+          python scripts/plugins/test-platform-examples.py
+
   # The Windows tests used to be one job named `test (windows-latest)`; they're now legs named
   # `test (windows-latest, unit)` and `test (windows-latest, integration)`. This job keeps the old
   # name reporting, so a required status check on it (none today) would keep working. It fails

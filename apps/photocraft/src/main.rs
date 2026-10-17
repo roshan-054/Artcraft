@@ -2,7 +2,8 @@
 //!
 //! Usage: `photocraft [--control <port>] [--control-token <64-hex> |
 //! --control-token-file <path>] [--automation-read-root <dir>]
-//! [--automation-write-root <dir>] [--safe-gpu] [--in-window-menus] [--present-mode <mode>]
+//! [--automation-write-root <dir>] [--safe-gpu] [--disable-plugins] [--in-window-menus]
+//! [--present-mode <mode>]
 //! [--frame-latency <n>] [--stroke-trace <stderr|file.csv>] [--new-instance] [files…]`
 //!
 //! On Windows and Linux a launch hands its files to the PhotoCraft that is already running (new
@@ -17,6 +18,10 @@
 //! `--safe-gpu` starts with the CPU renderer (no GPU canvas; a software adapter for the window
 //! where the platform has one) for this launch, e.g. after a graphics driver crash. A start that
 //! crashes inside the driver also falls back by itself next time (see `gpu_startup`).
+//!
+//! `--disable-plugins` starts a recovery session without loading managed panel/native packages
+//! or the additional filter folder. Plugin installation/execution is blocked for this launch;
+//! existing plugin files, enable flags and saved preferences are left intact.
 //!
 //! `--in-window-menus` (or `PHOTOCRAFT_IN_WINDOW_MENUS=1`) keeps the menus inside the window on
 //! macOS instead of the macOS menu bar (`mac_menu`).
@@ -155,6 +160,46 @@ fn control_args_exit_code(errors: &[String]) -> Option<i32> {
     if errors.is_empty() { None } else { Some(2) }
 }
 
+/// Recovery must bypass the store entirely, including guest startup/manifest validation.
+fn load_startup_extensions(app: &mut PhotocraftApp, settings: Option<std::path::PathBuf>) {
+    if app.session.plugins_disabled {
+        let message = "Plugins are disabled for this recovery session. Restart PhotoCraft normally to use them.";
+        log::info!("{message}");
+        app.ui.status = message.into();
+        app.session.extensions.load_errors.push(message.into());
+        return;
+    }
+    if let Some(dir) = settings
+        && let Err(error) = app.session.extensions.attach_folder(dir.join("Extensions"))
+    {
+        log::warn!("Could not load extensions: {error}");
+        app.session.extensions.load_errors.push(error.to_string());
+    }
+}
+
+#[cfg(test)]
+mod plugin_startup_tests {
+    use super::*;
+
+    #[test]
+    fn recovery_does_not_open_or_create_a_managed_store_or_change_preferences() {
+        let unique = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let settings = std::env::temp_dir().join(format!("photocraft-recovery-{}-{unique}", std::process::id()));
+        assert!(!settings.exists());
+        let mut session = Session::new();
+        session.plugins_disabled = true;
+        let mut app = PhotocraftApp::new(session, photocraft_ui_egui::Services::default());
+        let prefs = app.session.prefs_to_json();
+        load_startup_extensions(&mut app, Some(settings.clone()));
+        assert!(!settings.exists(), "startup must not even create/read the plugin store");
+        assert!(app.session.extensions.folder.is_none());
+        assert!(app.session.extensions.installed.is_empty());
+        assert_eq!(app.session.prefs_to_json(), prefs);
+        assert!(app.ui.status.contains("disabled for this recovery session"));
+        assert_eq!(app.session.extensions.load_errors.len(), 1);
+    }
+}
+
 #[cfg(test)]
 mod control_port_tests {
     use super::{control_args_exit_code, parse_control_port};
@@ -208,6 +253,7 @@ fn main() -> eframe::Result {
     // reported in a notice once the app is up; a control token is a usage error like a bad port.
     let mut unreadable_paths: Vec<String> = Vec::new();
     let mut safe_gpu = false;
+    let mut disable_plugins = false;
     let mut new_instance = false;
     // Options that apply only to the process they're given to; a launch with any keeps its own.
     let mut launch_options: Vec<&'static str> = Vec::new();
@@ -240,6 +286,10 @@ fn main() -> eframe::Result {
             Some("--safe-gpu") => {
                 launch_options.push("--safe-gpu");
                 safe_gpu = true;
+            }
+            Some("--disable-plugins") => {
+                launch_options.push("--disable-plugins");
+                disable_plugins = true;
             }
             Some(flag @ ("--present-mode" | "--frame-latency" | "--stroke-trace")) => {
                 launch_options.push(match flag {
@@ -499,7 +549,10 @@ fn main() -> eframe::Result {
                         services::xwayland_command(var("FLATPAK_ID").as_deref(), var("APPIMAGE").as_deref(), std::env::var_os("DISPLAY").is_some());
                 }
             }
-            let mut app = PhotocraftApp::new(Session::new(), services);
+            let mut session = Session::new();
+            session.plugins_disabled = disable_plugins;
+            let mut app = PhotocraftApp::new(session, services);
+            load_startup_extensions(&mut app, services::config_dir());
             app.min_frame_ms = uncapped.then_some(1000.0 / 240.0);
             app.integrated_titlebar = cfg!(target_os = "macos");
             app.custom_titlebar = custom_titlebar;

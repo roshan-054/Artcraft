@@ -112,8 +112,8 @@ fn parse_steps(v: &Value, cmd: &str) -> Result<Vec<(String, Value)>> {
         .collect()
 }
 
-fn check_known(steps: &[(String, Value)], cmd: &str) -> Result<()> {
-    match steps.iter().find(|(id, _)| crate::commands::find(id).is_none()) {
+fn check_known(s: &Session, steps: &[(String, Value)], cmd: &str) -> Result<()> {
+    match steps.iter().find(|(id, _)| !s.has_command(id)) {
         Some((id, _)) => Err(bad(cmd, format!("unknown command `{id}` in the script"))),
         None => Ok(()),
     }
@@ -155,7 +155,7 @@ fn browse(s: &mut Session, p: &Value) -> Result<Value> {
         (_, _, Some(v)) => parse_steps(v, cmd)?,
         _ => return Err(bad(cmd, "give \"path\" (a script file), \"script\" (its text) or \"steps\"")),
     };
-    check_known(&steps, cmd)?;
+    check_known(s, &steps, cmd)?;
     let results = run_steps(s, &steps);
     let ok = results.iter().all(|r| r.get("error").is_none());
     Ok(json!({"steps": steps.len(), "ok": ok, "results": results}))
@@ -229,7 +229,7 @@ fn script_events(s: &mut Session, p: &Value) -> Result<Value> {
             return Err(bad(cmd, "add needs \"script\" (a file) or \"steps\" (an action)"));
         }
         if let Some(st) = &steps {
-            check_known(&parse_steps(st, cmd)?, cmd)?;
+            check_known(s, &parse_steps(st, cmd)?, cmd)?;
         }
         let name = a
             .get("name")
@@ -316,7 +316,7 @@ fn create_droplet(s: &mut Session, p: &Value) -> Result<Value> {
     let mut steps = parse_steps(steps_v, cmd)?;
     // The droplet's output folder replaces recorded saves, and view steps don't apply, as in batch.
     steps.retain(|(id, _)| !crate::actions_cmds::shell_save_command(id) && !crate::actions_cmds::shell_view_command(id));
-    check_known(&steps, cmd)?;
+    check_known(s, &steps, cmd)?;
     // Play Action steps need their actions when the droplet runs on its own (#2794). Not under
     // `actions`: the CLI reads that key as an action set.
     let called = crate::actions_cmds::called_actions(&s.actions.list, &mut steps);

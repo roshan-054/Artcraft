@@ -40,6 +40,10 @@ pub mod edit_menu_cmds;
 pub mod eraser_cmds;
 pub mod export_preset_cmds;
 pub mod exr_cmds;
+pub mod extension_cmds;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod extension_package;
+pub mod extension_update_cmds;
 pub mod extra_cmds;
 pub mod face_cmds;
 pub mod file_cmds;
@@ -90,6 +94,13 @@ pub mod photo_cmds;
 pub mod pick_cmds;
 mod pixels;
 pub mod plugin_cmds;
+pub mod plugin_host;
+pub mod plugin_image_cmds;
+pub mod plugin_preview;
+#[cfg(not(target_arch = "wasm32"))]
+mod plugin_runtime;
+pub mod plugin_scheduler;
+pub mod plugin_task_cmds;
 pub mod prefs;
 pub mod preset_import_cmds;
 pub mod preset_store;
@@ -146,6 +157,8 @@ pub use photocraft_paint::BrushSettings;
 
 #[derive(Debug, thiserror::Error)]
 pub enum EngineError {
+    #[error("plugin API: {0}")]
+    PluginApi(#[from] photocraft_plugin_api::ApiError),
     #[error("unknown command `{0}`")]
     UnknownCommand(String),
     #[error("command `{0}` is not available right now: {1}")]
@@ -437,6 +450,13 @@ pub const PRECHECKED: &[&str] = &["layer.new.layer", "layer.new.group", "layer.n
 
 #[derive(Default)]
 pub struct Session {
+    /// Temporary recovery policy. Set before loading preferences or plugins; never persisted.
+    /// Plugin execution/inspection/installation is unavailable, while ordinary editing remains usable.
+    pub plugins_disabled: bool,
+    /// Installed native-panel extensions and their isolated state.
+    pub extensions: extension_cmds::ExtensionHost,
+    /// Cooperative process-wide plugin admission; declarations are not OS containment.
+    pub(crate) plugin_scheduler: plugin_scheduler::PluginScheduler,
     docs: Vec<DocState>,
     active: Option<usize>,
     pub tools: ToolState,
@@ -546,6 +566,7 @@ impl Session {
         if index < self.docs.len() {
             self.active = Some(index);
             self.sync_tools_mask_target();
+            self.plugin_document_changed();
             true
         } else {
             false
@@ -593,6 +614,7 @@ impl Session {
         self.docs.push(st);
         let i = self.docs.len() - 1;
         self.active = Some(i);
+        self.plugin_document_changed();
         i
     }
 
@@ -618,6 +640,8 @@ impl Session {
         smart_cmds::on_close(self, index);
         if let Some(id) = self.docs.get(index).map(|d| d.doc.id) {
             self.cancel_jobs_on(id);
+            self.extensions.previews.forget_source(id);
+            self.extensions.platform.forget_document(id);
             self.subject_cache.forget_doc(id);
             self.object_finder.forget_doc(id);
         }
@@ -631,6 +655,7 @@ impl Session {
                 _ => index.min(self.docs.len() - 1),
             })
         };
+        self.plugin_document_changed();
         Some(d)
     }
 
@@ -739,12 +764,41 @@ impl Session {
 
     /// [`Self::disabled_reason`] for a call with `params`.
     pub fn disabled_reason_with(&self, id: &str, params: &Value) -> Option<String> {
-        let Some(s) = commands::find(id) else { return Some(format!("unknown command `{id}`")) };
+        let Some(s) = commands::find(id) else {
+            return if plugin_host::is_contributed(self, id) { plugin_host::dynamic_reason(self, id) } else { Some(format!("unknown command `{id}`")) };
+        };
         self.precondition(s, &channel_cmds::inject_target(self, id, params.clone())).err().or_else(|| self.job_conflict(id, s.journal))
+    }
+
+    /// Launch-only recovery policy, checked before command setup can change a document.
+    pub(crate) fn plugin_recovery_refusal(&self, id: &str) -> Option<String> {
+        if self.plugins_disabled
+            && matches!(
+                id,
+                "plugin.install"
+                    | "plugin.reload"
+                    | "plugin.run"
+                    | "extension.inspect"
+                    | "extension.install"
+                    | "extension.invoke"
+                    | "extension.view.open"
+                    | "plugin.document.read"
+                    | "plugin.document.edit"
+                    | "plugin.processImage"
+                    | "plugin.runTask"
+                    | "image.pluginPreview.apply"
+            )
+        {
+            return Some("Plugins are disabled for this recovery session. Restart PhotoCraft normally to use them.".into());
+        }
+        None
     }
 
     /// The command's own precondition for a call with `params` (their target filled in).
     fn precondition(&self, spec: &commands::CommandSpec, params: &Value) -> std::result::Result<(), String> {
+        if let Some(why) = self.plugin_recovery_refusal(spec.id) {
+            return Err(why);
+        }
         if self.names_existing_layer(spec.id, params) {
             return Ok(());
         }
@@ -849,6 +903,7 @@ impl Session {
             self.subject_cache = Default::default();
             self.object_finder = Default::default();
         }
+        self.plugin_document_changed();
         Ok(r)
     }
 
@@ -869,6 +924,7 @@ impl Session {
             st.saved_revision = st.revision;
         }
         st.last_damage = Some(photocraft_geom::Rect::EMPTY);
+        self.plugin_document_changed();
         Ok(())
     }
 
@@ -934,6 +990,7 @@ impl Session {
                 restore_target(st, layers);
                 st.revision += 1;
                 st.last_damage = damage;
+                self.plugin_document_changed();
                 true
             }
             None => false,
@@ -956,6 +1013,7 @@ impl Session {
                 restore_target(st, layers);
                 st.revision += 1;
                 st.last_damage = damage;
+                self.plugin_document_changed();
                 true
             }
             None => false,

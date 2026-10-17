@@ -85,6 +85,7 @@ pub mod egui_fonts;
 pub mod enable_rules;
 pub mod eraser_ui;
 pub mod export_dialog;
+pub mod extension_ui;
 pub mod eyedropper_ui;
 pub mod field_tab;
 pub mod file_dialog;
@@ -1900,15 +1901,18 @@ impl eframe::App for PhotocraftApp {
         // shortcuts see Esc).
         if !screen_picker::tick(self, ctx) {
             jobs_ui::tick(self, ctx);
+            extension_ui::tick_updates(self, ctx);
             #[cfg(not(target_arch = "wasm32"))]
             filter_preview_worker::discard_closed(self);
             shortcuts::handle(self, ctx);
         }
         let arrived: Vec<(String, Vec<u8>)> =
             self.services.inbox.as_ref().map(|q| std::mem::take(&mut *q.lock().unwrap_or_else(|e| e.into_inner()))).unwrap_or_default();
-        for (name, bytes) in arrived {
-            if let Err(e) = self.open_bytes(&name, &bytes) {
-                self.open_failed(&name, &e);
+        if !extension_ui::review_arrived(self, &arrived) {
+            for (name, bytes) in arrived {
+                if let Err(e) = self.open_bytes(&name, &bytes) {
+                    self.open_failed(&name, &e);
+                }
             }
         }
         // Finder double-click / Open With / Dock drops (macOS open-documents events).
@@ -2034,6 +2038,7 @@ impl eframe::App for PhotocraftApp {
         panels::properties_window(self, &ctx);
         brush_panel::window(self, &ctx);
         preset_panels::windows(self, &ctx);
+        extension_ui::windows(self, &ctx);
         gradient_ui::editor_window(self, &ctx);
         type_panels_ui::windows(self, &ctx);
         analysis_ui::windows(self, &ctx);

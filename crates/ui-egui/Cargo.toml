@@ -20,6 +20,7 @@ photocraft-gpu = { workspace = true }
 photocraft-engine = { workspace = true }
 photocraft-io = { workspace = true }
 photocraft-plugins = { workspace = true }
+photocraft-plugin-api = { workspace = true }
 photocraft-algo = { workspace = true }
 photocraft-text = { workspace = true }
 photocraft-vector = { workspace = true }
@@ -52,6 +53,7 @@ sys-locale = "=0.3.2"
 winsafe = { version = "=0.0.29", default-features = false, features = ["kernel", "dxgi"] }
 
 [dev-dependencies]
+wat = "1.228"
 # egui's own default fonts in tests: the oracle for egui_fonts.rs, and contexts made with
 # `Context::default()` (no install_fonts) can lay out text.
 egui = { workspace = true, features = ["default_fonts"] }

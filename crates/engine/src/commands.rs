@@ -1243,7 +1243,7 @@ fn build() -> Vec<CommandSpec> {
             shortcut: None,
             params: "{}",
             enabled: always,
-            run: |s, _| Ok(Value::Array(command_specs().iter().map(|c| list_entry(s, c, (c.enabled)(s).err())).collect())),
+            run: |s, _| Ok(Value::Array(s.command_entries())),
             journal: false,
         },
         CommandSpec {
@@ -1490,6 +1490,12 @@ fn build() -> Vec<CommandSpec> {
     v.extend(crate::rasterize_style_cmds::specs());
     v.extend(crate::variables_cmds::specs());
     v.extend(crate::plugin_cmds::specs());
+    v.extend(crate::extension_cmds::specs());
+    v.extend(crate::extension_update_cmds::specs());
+    v.extend(crate::plugin_host::specs());
+    v.extend(crate::plugin_image_cmds::specs());
+    v.extend(crate::plugin_task_cmds::specs());
+    v.extend(crate::plugin_preview::specs());
     v.extend(crate::group_view_cmds::specs());
     v.extend(crate::fx_view_cmds::specs());
     v.extend(crate::fx_visibility_cmds::specs());

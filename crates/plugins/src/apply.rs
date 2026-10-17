@@ -91,6 +91,19 @@ impl Plugin {
     /// returns the new surface. `canvas` is the document bounds; `selection` (coverage in
     /// channel 0) limits and feathers the result, as for built-in filters.
     pub fn apply(&self, surface: &Surface, canvas: Rect, selection: Option<&Surface>, params: &Value) -> Result<Surface> {
+        self.apply_with(surface, canvas, selection, params, &photocraft_raster::Interrupt::NONE)
+    }
+
+    /// As `apply`, with cancellation checked between interpreter fuel slices and bands.
+    pub fn apply_with(
+        &self,
+        surface: &Surface,
+        canvas: Rect,
+        selection: Option<&Surface>,
+        params: &Value,
+        interrupt: &photocraft_raster::Interrupt,
+    ) -> Result<Surface> {
+        interrupt.check().map_err(|_| Error::Failed("cancelled".into()))?;
         let resolved = self.manifest().resolve_params(params)?;
         let area = self.output_area(surface, canvas, selection);
         let mut out = surface.clone();
@@ -121,7 +134,7 @@ impl Plugin {
                 tx += across;
             }
         }
-        let deadline = Deadline::new(self.limits());
+        let deadline = Deadline::with_interrupt(self.limits(), *interrupt);
         let ctx = BandCtx { surface, extent, canvas, selection, fmt, ov, params: Value::Object(resolved) };
         let run = |b: &Rect| {
             let r = self.run_band(&ctx, *b, &deadline).map(|data| encode_band(surface, *b, &data));
@@ -135,7 +148,9 @@ impl Plugin {
         let group = rayon::current_num_threads().max(1);
         #[cfg(target_arch = "wasm32")]
         let group = 1;
+        let mut complete = 0usize;
         for chunk in bands.chunks(group) {
+            interrupt.check().map_err(|_| Error::Failed("cancelled".into()))?;
             #[cfg(not(target_arch = "wasm32"))]
             let results: Vec<Result<Surface>> = {
                 use rayon::prelude::*;
@@ -148,7 +163,10 @@ impl Plugin {
                     out.tile_mut(*c).bytes_mut().copy_from_slice(t.bytes());
                 }
             }
+            complete = complete.saturating_add(chunk.len());
+            interrupt.progress(complete as f32 / bands.len().max(1) as f32);
         }
+        interrupt.check().map_err(|_| Error::Failed("cancelled".into()))?;
         out.prune();
         Ok(out)
     }
@@ -200,7 +218,14 @@ impl Plugin {
                         v = v.clamp(0.0, 1.0);
                     }
                     if let Some(d) = out.get_mut(di + ch) {
-                        *d = o + (v - o) * k;
+                        // Preserve unselected pixels exactly and retain normal f32 rounding.
+                        // Only an overflowing HDR blend needs the wider fallback.
+                        *d = if k <= 0.0 {
+                            o
+                        } else {
+                            let blended = o + (v - o) * k;
+                            if blended.is_finite() { blended } else { (f64::from(o) + (f64::from(v) - f64::from(o)) * f64::from(k)) as f32 }
+                        };
                     }
                 }
             }

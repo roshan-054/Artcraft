@@ -776,6 +776,10 @@ pub struct PlugIns {
     /// Load the WebAssembly plug-ins (`*.wasm`) in `additional_plugins_folder` (native only).
     pub use_additional_plugins_folder: bool,
     pub additional_plugins_folder: String,
+    /// Desktop release discovery only; packages still require explicit download and review.
+    pub automatic_update_checks: bool,
+    /// Last discovery attempt, including failures, to avoid repeated requests after restart.
+    pub last_update_check_unix_secs: u64,
     pub show_extension_panels: bool,
     pub allow_scripts_to_connect: bool,
     pub generator_enabled: bool,
@@ -786,6 +790,8 @@ impl Default for PlugIns {
         Self {
             use_additional_plugins_folder: false,
             additional_plugins_folder: String::new(),
+            automatic_update_checks: true,
+            last_update_check_unix_secs: 0,
             show_extension_panels: true,
             allow_scripts_to_connect: false,
             generator_enabled: false,
@@ -1055,7 +1061,7 @@ pub const HIDDEN_UNTIL_IMPLEMENTED: &[&str] = &[
 
 /// Is the preference at `path` (`"section.key"`) hidden from the Preferences dialog?
 pub fn is_hidden(path: &str) -> bool {
-    HIDDEN_UNTIL_IMPLEMENTED.contains(&path) || (!cfg!(target_os = "linux") && LINUX_ONLY.contains(&path))
+    path == "plugIns.lastUpdateCheckUnixSecs" || HIDDEN_UNTIL_IMPLEMENTED.contains(&path) || (!cfg!(target_os = "linux") && LINUX_ONLY.contains(&path))
 }
 
 /// Preferences that only do something on Linux; the dialog doesn't show them elsewhere. They
@@ -1561,9 +1567,38 @@ pub fn bindable_items() -> impl Iterator<Item = (&'static str, &'static str, &'s
     engine.chain(shell).chain(tools).chain(hold)
 }
 
-/// Every bindable id with its default.
-fn bindable() -> impl Iterator<Item = (&'static str, Option<&'static str>)> {
-    bindable_items().map(|i| (i.0, i.3))
+struct BindingItem {
+    id: String,
+    label: String,
+    menu: Vec<String>,
+    default: Option<String>,
+    kind: BindKind,
+}
+
+/// Snapshot installed contributions with built-ins before validating a shortcut change.
+fn session_bindable_items(s: &Session) -> Vec<BindingItem> {
+    let mut items: Vec<_> = bindable_items()
+        .map(|(id, label, menu, default, kind)| BindingItem {
+            id: id.into(),
+            label: label.into(),
+            menu: menu.iter().map(|part| (*part).into()).collect(),
+            default: default.map(str::to_owned),
+            kind,
+        })
+        .collect();
+    for installed in s.extensions.installed.values() {
+        let manifest = &installed.extension.manifest;
+        for command in &manifest.contributes.commands {
+            items.push(BindingItem {
+                id: command.id.clone(),
+                label: command.label.clone(),
+                menu: vec!["Plugins".into(), manifest.name.clone()],
+                default: None,
+                kind: BindKind::Command,
+            });
+        }
+    }
+    items
 }
 
 fn is_tool(id: &str) -> bool {
@@ -1909,6 +1944,8 @@ fn preferences_section(s: &mut Session, p: &Value) -> Result<Value> {
 /// Edit › Keyboard Shortcuts (engine part): list, change and reset application shortcuts.
 fn keyboard_shortcuts(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "edit.keyboardShortcuts";
+    let items = session_bindable_items(s);
+    let bindable = || items.iter().map(|item| (item.id.as_str(), item.default.as_deref()));
     // Every change lands at once, after all of it validated: a bad key leaves the set as it was.
     let mut next = s.prefs().clone();
     // A set loads first, so the call's other changes apply on top of it.
@@ -1950,7 +1987,12 @@ fn keyboard_shortcuts(s: &mut Session, p: &Value) -> Result<Value> {
                 _ => return Err(bad(cmd, "`importKys` is the text of a .kys file, or {\"path\": …}")),
             };
             let set = crate::kys::parse(xml).map_err(|e| bad(cmd, e))?;
-            let plan = crate::kys::plan(crate::kys::command_candidates(), &set);
+            let candidates = items.iter().filter(|item| item.kind == BindKind::Command && !item.menu.is_empty()).map(|item| crate::kys::Candidate {
+                id: item.id.clone(),
+                label: item.label.clone(),
+                default: item.default.clone(),
+            });
+            let plan = crate::kys::plan(candidates, &set);
             let mut merged = serde_json::Map::new();
             // A key the system reserves is left out (reported as `reserved`), not a failed import.
             let mut skipped: Vec<String> = Vec::new();
@@ -1961,7 +2003,7 @@ fn keyboard_shortcuts(s: &mut Session, p: &Value) -> Result<Value> {
                 }
                 !bad
             }) {
-                let default = crate::command_specs().iter().find(|c| c.id == id).and_then(|c| c.shortcut).and_then(normalize_shortcut);
+                let default = items.iter().find(|item| item.id == *id).and_then(|item| item.default.as_deref()).and_then(normalize_shortcut);
                 merged.insert(id.clone(), if default.as_deref() == Some(sc.as_str()) { Value::Null } else { json!(sc) });
             }
             // Tool keys: a tool's own letter restores it (and its Shift cycling).
@@ -2076,22 +2118,24 @@ fn keyboard_shortcuts(s: &mut Session, p: &Value) -> Result<Value> {
     // the exports are written, so a bad export target changes nothing.
     let prefs = &next;
     let filter = p.get("filter").and_then(Value::as_str).map(str::to_ascii_lowercase);
-    let list: Vec<Value> = bindable_items()
-        .filter(|c| filter.as_ref().is_none_or(|f| c.0.to_ascii_lowercase().contains(f) || c.1.to_ascii_lowercase().contains(f)))
-        .filter(|c| {
+    let list: Vec<Value> = items
+        .iter()
+        .filter(|item| filter.as_ref().is_none_or(|f| item.id.to_ascii_lowercase().contains(f) || item.label.to_ascii_lowercase().contains(f)))
+        .filter(|item| {
             p.get("list").and_then(Value::as_bool).unwrap_or(false)
                 || filter.is_some()
-                || prefs.shortcuts.contains_key(c.0)
-                || prefs.alternate_shortcuts.contains_key(c.0)
+                || prefs.shortcuts.contains_key(&item.id)
+                || prefs.alternate_shortcuts.contains_key(&item.id)
         })
-        .map(|(id, label, menu, def, kind)| {
-            let main = prefs.shortcut(id, def);
-            let defaults: Vec<&str> = default_alternates(id).collect();
-            let mut v = json!({"id": id, "label": label, "menu": menu, "default": def, "shortcut": main, "alternates": prefs.alternates(id, main)});
+        .map(|item| {
+            let main = prefs.shortcut(&item.id, item.default.as_deref());
+            let defaults: Vec<&str> = default_alternates(&item.id).collect();
+            let mut v = json!({"id": item.id, "label": item.label, "menu": item.menu, "default": item.default, "shortcut": main,
+                "alternates": prefs.alternates(&item.id, main)});
             if !defaults.is_empty() {
                 v["defaultAlternates"] = json!(defaults);
             }
-            match kind {
+            match item.kind {
                 BindKind::Hold => v["hold"] = json!(true),
                 BindKind::Tool => v["tool"] = json!(true),
                 BindKind::Command => {}
@@ -2123,9 +2167,13 @@ fn keyboard_shortcuts(s: &mut Session, p: &Value) -> Result<Value> {
     let kys_target = file_target(cmd, p.get("exportKys"))?;
     let html_target = file_target(cmd, p.get("summarize"))?;
     let mut files: Vec<(&str, String, String)> = Vec::new();
+    let export_bindings = crate::shortcut_sets::bound_items(
+        prefs,
+        items.iter().map(|item| (item.id.as_str(), item.label.as_str(), item.menu.first().map(String::as_str), item.default.as_deref(), item.kind)),
+    );
     if let Some(target) = kys_target {
         let entries: Vec<crate::kys::Entry> =
-            crate::shortcut_sets::bound(prefs).into_iter().map(|b| crate::kys::Entry { id: b.id, label: b.label, tool: b.tool, keys: b.keys }).collect();
+            export_bindings.iter().map(|b| crate::kys::Entry { id: b.id.clone(), label: b.label.clone(), tool: b.tool, keys: b.keys.clone() }).collect();
         let text = crate::kys::write(set_name, &entries);
         match target {
             Some(path) => files.push(("kysPath", path, text)),
@@ -2136,7 +2184,7 @@ fn keyboard_shortcuts(s: &mut Session, p: &Value) -> Result<Value> {
         let v = p.get("summarize").cloned().unwrap_or(Value::Null);
         let mac = v.get("mac").and_then(Value::as_bool).unwrap_or(cfg!(target_os = "macos"));
         let mut sections: Vec<crate::shortcut_sets::Section> = Vec::new();
-        for crate::shortcut_sets::Bound { label, menu, keys, .. } in crate::shortcut_sets::bound(prefs) {
+        for crate::shortcut_sets::Bound { label, menu, keys, .. } in export_bindings {
             match sections.iter_mut().find(|(m, _)| *m == menu) {
                 Some((_, rows)) => rows.push((label, keys)),
                 None => sections.push((menu, vec![(label, keys)])),

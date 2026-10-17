@@ -208,7 +208,18 @@ impl<'a> ZipReader<'a> {
             .and_then(|end| self.bytes.get(e.data_offset..end))
             .ok_or_else(|| FormatError::corrupt(format!("zip entry `{}` out of range", e.name)))?;
         let data = match e.method {
-            0 => raw.to_vec(),
+            0 => {
+                // STORE has no decompression step: its actual payload size must already
+                // fit the caller's limit. Do not clone a large payload just because its
+                // untrusted central-directory header claims a smaller size.
+                if raw.len() > max {
+                    return Err(FormatError::LimitExceeded(format!("zip entry `{}` payload is {} bytes (max {max})", e.name, raw.len())));
+                }
+                if raw.len() != e.uncompressed {
+                    return Err(FormatError::corrupt(format!("zip entry `{}` has wrong size", e.name)));
+                }
+                raw.to_vec()
+            }
             8 => {
                 // The uncompressed length comes from an untrusted ZIP header: a
                 // small forged archive must not reserve gigabytes up front, so the
@@ -261,6 +272,21 @@ mod tests {
         assert_eq!(r.read_by_name("dir/b.bin", 100).unwrap(), [0, 1, 2, 3]);
         assert!(r.read_by_name("empty", 0).unwrap().is_empty());
         assert!(matches!(r.read_by_name("a.txt", 3), Err(FormatError::LimitExceeded(_))));
+    }
+
+    #[test]
+    fn store_payload_checks_actual_size_before_allocating() {
+        let mut writer = ZipWriter::new();
+        writer.add("payload", b"123456789").unwrap();
+        let mut bytes = writer.finish().unwrap();
+        let central = bytes.windows(4).position(|window| window == CENTRAL_SIG.to_le_bytes()).unwrap();
+        // Keep the actual STORE payload at nine bytes while claiming just one byte. A
+        // four-byte caller limit must reject the actual payload before cloning it.
+        bytes[central + 24..central + 28].copy_from_slice(&1u32.to_le_bytes());
+        let reader = ZipReader::new(&bytes).unwrap();
+        assert!(matches!(reader.read_by_name("payload", 4), Err(FormatError::LimitExceeded(_))));
+        // A sufficiently large caller budget still rejects the forged length as corrupt.
+        assert!(matches!(reader.read_by_name("payload", 16), Err(FormatError::Corrupt(_))));
     }
 
     #[test]

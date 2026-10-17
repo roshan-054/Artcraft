@@ -1,0 +1,45 @@
+{
+  "artifacts": [
+    {
+      "kind": "nativeWorker",
+      "name": "Image-Gain-worker-windows-x86_64.exe",
+      "path": "extension-review/plugin-current-api-fixtures/Image-Gain-worker-windows-x86_64.exe",
+      "size": 632320,
+      "sha256": "d12ca8f004bec7323ee12749f437b738bbb1a42fa1bf9524677eca2732fb0dc0",
+      "blake3": "198fda35aa76d5d270dd61ec3c50a1ba159597c97fafc1516f93d2b481843424",
+      "license": "MIT OR Apache-2.0; exact dependency notices and licenses retained under tests/plugin-compatibility/licenses",
+      "package": {
+        "filters": [
+          {
+            "module": "filters/channel-gain.wasm"
+          }
+        ],
+        "module": "plugin.pcext",
+        "native": {
+          "entry": "image-gain-worker.exe",
+          "platform": "windows-x86_64",
+          "service": "plugin.processImage"
+        },
+        "packageVersion": 2
+      }
+    }
+  ],
+  "formatVersion": 1,
+  "frozen": [
+    {
+      "blake3": "d6e5fccab8f4015b9c142c822ebe82889e8101c13f8ede3574c222862888d226",
+      "path": "frozen/channel-gain-filter-v1.wasm",
+      "size": 41748,
+      "sha256": "c7997d79c49d4406f0cb78fd6918784ab7d5abc8a530f2231a3f93c0462cc8d8"
+    },
+    {
+      "path": "frozen/image-gain-panel.wasm",
+      "size": 101110,
+      "sha256": "5c3634aa9e501cbd7e8f177766917d1a59d77dde5affb5a2cfa2bb52e79e9ef5",
+      "blake3": "ad5fd06a944e8c1abeaf3fe83df83f05be23400357eb4aa46099a2554e73da31",
+      "source": "examples/extensions/image-plugin-starter; current API source built independently on 2026-10-16"
+    }
+  ],
+  "frozenAt": "2026-10-16",
+  "policy": "Compiled neutral panel, filter and native worker fixtures verify the current contracts independently of source rebuilds."
+}

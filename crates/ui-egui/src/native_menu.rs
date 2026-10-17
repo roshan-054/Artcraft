@@ -747,6 +747,10 @@ pub(crate) fn state_hash(app: &PhotocraftApp, input: Option<u64>) -> u64 {
     let mut h = DefaultHasher::new();
     input.hash(&mut h);
     let s = &app.session;
+    s.extensions.revision.hash(&mut h);
+    for (id, panel) in &app.ui.extensions.panels {
+        (id, panel.open).hash(&mut h);
+    }
     s.journal.len().hash(&mut h);
     s.active_index().hash(&mut h);
     for d in s.documents() {
@@ -832,7 +836,7 @@ mod tests {
         assert!(!ids(&by("Help").children).contains(&"help.about".to_string()));
         assert!(!ids(&by("Edit").children).contains(&"[Preferences]".to_string()));
         let titles: Vec<&str> = l.bar.menus.iter().map(|m| m.title.as_str()).collect();
-        assert_eq!(titles, ["PhotoCraft", "File", "Edit", "Image", "Layer", "Type", "Select", "Filter", "View", "Window", "Help"]);
+        assert_eq!(titles, ["PhotoCraft", "File", "Edit", "Image", "Layer", "Type", "Select", "Filter", "View", "Plugins", "Window", "Help"]);
     }
 
     /// PhotoCraft keeps Photoshop's ⌘H, ⌘M, ⌘W and ⌘, (Hide Layers): the system items give way.

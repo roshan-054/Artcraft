@@ -23,7 +23,7 @@ pub use photocraft_engine::kys::{KysCommand, KysSet, MAX_BYTES, Plan, parse};
 pub fn plan(app: &PhotocraftApp, set: &KysSet) -> Plan {
     use photocraft_engine::kys::Candidate;
     let items = crate::menus::menu_items(app);
-    let menu = items.iter().filter(|i| i.label != "---" && crate::menus::is_live(&i.id)).map(|i| Candidate {
+    let menu = items.iter().filter(|i| i.label != "---" && (crate::menus::is_live(&i.id) || app.session.has_command(&i.id))).map(|i| Candidate {
         id: i.id.clone(),
         label: i.label.clone(),
         default: crate::shortcuts::default_shortcut(&i.id),

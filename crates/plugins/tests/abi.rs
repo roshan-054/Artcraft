@@ -3,13 +3,47 @@
 
 use std::time::{Duration, Instant};
 
-use photocraft_color::{PixelFormat, SampleType};
+use photocraft_color::{ColorMode, PixelFormat, SampleType};
 use photocraft_geom::Rect;
 use photocraft_plugins::{Error, Limits, Plugin};
 use photocraft_raster::Surface;
 use serde_json::json;
 
 const INVERT: &[u8] = include_bytes!("fixtures/invert.wasm");
+
+#[test]
+fn interrupt_stops_a_running_guest_between_fuel_slices_without_changing_the_source() {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
+    let bytes = ok_module("(loop $spin (br $spin)) (i32.const 0)");
+    let plugin = Plugin::load(&bytes, Limits { fuel_base: u64::MAX / 4, wall_time_ms: 30_000, ..Limits::default() }).unwrap();
+    let input = surface(PixelFormat::RGBA8, 4, 4);
+    let before = input.read_region(Rect::new(0, 0, 4, 4));
+    let flag = Arc::new(AtomicBool::new(false));
+    let other = Arc::clone(&flag);
+    let cancel_thread = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(60));
+        other.store(true, Ordering::Relaxed);
+    });
+    let cancel = || flag.load(Ordering::Relaxed);
+    let started = Instant::now();
+    let error = plugin.apply_with(&input, Rect::new(0, 0, 4, 4), None, &json!({}), &photocraft_raster::Interrupt::cancel_only(&cancel)).unwrap_err();
+    cancel_thread.join().unwrap();
+    assert!(error.to_string().contains("cancelled"), "{error}");
+    assert!(started.elapsed() < Duration::from_secs(10));
+    assert_eq!(input.read_region(Rect::new(0, 0, 4, 4)), before);
+}
+
+#[test]
+fn interrupt_cancels_before_guest_work_and_reports_no_false_success() {
+    let plugin = Plugin::load(INVERT, Limits::default()).unwrap();
+    let input = surface(PixelFormat::RGBA8, 2, 2);
+    let cancel = || true;
+    let error = plugin.apply_with(&input, Rect::new(0, 0, 2, 2), None, &json!({}), &photocraft_raster::Interrupt::cancel_only(&cancel)).unwrap_err();
+    assert!(error.to_string().contains("cancelled"));
+}
 
 /// A module implementing the ABI whose pieces can be swapped: `manifest` JSON, `version`,
 /// `filter` body (params `$buf $len $w $h $ch $fmt $pp $pl`, result i32) and extra items.
@@ -155,6 +189,52 @@ fn nan_and_out_of_range_output_is_sanitised() {
     let p = Plugin::load(&ok_module(nan), Limits::default()).unwrap();
     let s = surface(PixelFormat::RGBA32F, 8, 8);
     assert_eq!(p.apply(&s, Rect::new(0, 0, 8, 8), None, &json!({})).unwrap(), s);
+}
+
+#[test]
+fn ordinary_float_selection_blends_keep_existing_pixel_bits() {
+    let p = Plugin::load(INVERT, Limits::default()).unwrap();
+    let bounds = Rect::new(0, 0, 1, 1);
+    let mut s = Surface::new(PixelFormat::RGBA32F);
+    s.write_pixel(0, 0, &[1.0 / 30.0, 2.0 / 30.0, 1.0 / 3.0, 1.0]);
+    let mut selection = Surface::new(PixelFormat::GRAY8);
+    selection.write_pixel(0, 0, &[0.4]);
+    let out = p.apply(&s, bounds, Some(&selection), &json!({})).unwrap();
+    // Frozen output from the existing f32 selection blend. Widening every blend to f64
+    // changes each colour by one ULP and breaks parity with the built-in filter.
+    assert_eq!(out.pixel(0, 0).iter().map(|v| v.to_bits()).collect::<Vec<_>>(), [0x3ed0_369c, 0x3ed3_a06d, 0x3eee_eeee, 0x3f80_0000]);
+}
+
+#[test]
+fn finite_hdr_output_blends_without_overflow_and_preserves_unselected_pixels() {
+    let maximum = r#"(local $i i32)
+      (block $done (loop $l
+        (br_if $done (i32.ge_u (local.get $i) (local.get $len)))
+        (f32.store (i32.add (local.get $buf) (local.get $i)) (f32.const 0x1.fffffep+127))
+        (local.set $i (i32.add (local.get $i) (i32.const 4)))
+        (br $l)))
+      (i32.const 0)"#;
+    let p = Plugin::load(&ok_module(maximum), Limits::default()).unwrap();
+    let bounds = Rect::new(0, 0, 4, 1);
+    let mut s = Surface::new(PixelFormat::RGBA32F);
+    s.fill_rect(bounds, &[-f32::MAX, -f32::MAX, -f32::MAX, 1.0]);
+    let mut selection = Surface::new(PixelFormat::new(ColorMode::Grayscale, SampleType::F32, false));
+    // The zero-coverage pixel sits inside the selection bounds, so the host still processes
+    // its band. It must retain its exact source bytes even when the guest changes that pixel.
+    selection.write_region(bounds, &[1.0, 0.0, 0.5, 1.0]);
+    for mask in [None, Some(&selection)] {
+        let out = p.apply(&s, bounds, mask, &json!({})).unwrap();
+        for x in 0..4 {
+            assert!(out.pixel(x, 0).iter().all(|v| v.is_finite()));
+            assert_eq!(out.pixel(x, 0)[3], 1.0, "alpha remains bounded");
+        }
+        assert_eq!(out.pixel(0, 0)[0], f32::MAX);
+        assert_eq!(out.pixel(3, 0)[0], f32::MAX);
+        if mask.is_some() {
+            assert_eq!(out.pixel(1, 0), s.pixel(1, 0));
+            assert_eq!(out.pixel(2, 0)[0], 0.0);
+        }
+    }
 }
 
 #[test]

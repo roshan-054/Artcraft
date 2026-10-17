@@ -4797,6 +4797,7 @@ dependencies = [
  "photocraft-io",
  "photocraft-ops",
  "photocraft-paint",
+ "photocraft-plugin-api",
  "photocraft-plugins",
  "photocraft-psd",
  "photocraft-raster",
@@ -4804,9 +4805,14 @@ dependencies = [
  "photocraft-text",
  "photocraft-vector",
  "rayon",
+ "reqwest",
  "roxmltree",
+ "rustls",
+ "rustls-platform-verifier",
+ "semver",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
  "thiserror 2.0.21",
  "wat",
@@ -4912,11 +4918,44 @@ dependencies = [
 ]
 
 [[package]]
+name = "photocraft-plugin"
+version = "0.9.0"
+dependencies = [
+ "blake3",
+ "photocraft-engine",
+ "photocraft-format",
+ "photocraft-plugin-sdk",
+ "photocraft-plugins",
+ "serde_json",
+ "sha2",
+ "tempfile",
+]
+
+[[package]]
+name = "photocraft-plugin-api"
+version = "0.1.0"
+dependencies = [
+ "schemars",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "photocraft-plugin-sdk"
+version = "0.1.0"
+dependencies = [
+ "photocraft-plugin-api",
+ "serde_json",
+]
+
+[[package]]
 name = "photocraft-plugins"
 version = "0.9.0"
 dependencies = [
  "photocraft-color",
  "photocraft-geom",
+ "photocraft-plugin-api",
  "photocraft-raster",
  "rayon",
  "serde",
@@ -5025,6 +5064,7 @@ dependencies = [
  "photocraft-gpu",
  "photocraft-io",
  "photocraft-paint",
+ "photocraft-plugin-api",
  "photocraft-plugins",
  "photocraft-psd",
  "photocraft-raster",
@@ -5038,6 +5078,7 @@ dependencies = [
  "sys-locale",
  "toml",
  "unicode-bidi",
+ "wat",
  "winsafe",
 ]
 
@@ -6009,6 +6050,7 @@ checksum = "0d41d731c7d2f962d1ccc364cec258de3c0e93b38c2fb3ba97ac74513048d634"
 dependencies = [
  "aws-lc-rs",
  "once_cell",
+ "ring",
  "rustls-pki-types",
  "rustls-webpki",
  "subtle",

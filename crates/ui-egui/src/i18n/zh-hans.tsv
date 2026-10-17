@@ -10,6 +10,8 @@
 # No proprietary translation resources were consulted or extracted.
 # Licensed MIT OR Apache-2.0, as the code.
 # Product and technology names retain their spelling. See docs/localization-zh-hans.md.
+	Automatic update checks	自动检查更新
+	Last update check unix secs	上次检查更新的 Unix 时间（秒）
 
 # Channel Options and New Spot Channel (#3761)
 	Channel Color	通道颜色
@@ -2815,6 +2817,15 @@ curves	Smooth	平滑
 # Free Transform: a new layer while the box is open (#5859)
 	Free Transform is still being applied; try again when it has finished.	自由变换仍在应用中；请在完成后重试。
 	The transform couldn't be applied.	无法应用变换。
+
+# Native-panel extensions
+	Manage Extensions…	管理扩展…
+	Extensions	扩展
+
+# Plugins menu
+	Plugins	插件
+	Manage Plugins…	管理插件…
+
 # Preferences › Performance › GPU Memory; the status bar and slow-redraw notice
 	Its layers need {needed} of GPU memory; the budget leaves them {budget}.	其图层需要 {needed} GPU 内存；预算只留给它们 {budget}。
 	Set GPU Memory in Preferences › Performance to what your graphics card can hold, at most 3/8 of its memory. Automatic follows Memory Usage, within a quarter of this computer's memory and 3/8 of the card's, and doesn't count the document against a card whose memory is known. The status bar shows GPU Memory Full while they don't fit.	在 首选项 › 性能 中将 GPU 内存设置为显卡能容纳的大小，最多为其显存的 3/8。自动跟随内存使用量，不超过本机内存的四分之一和显卡显存的 3/8，且在显存已知的显卡上不把文档计入。在图层放不下期间，状态栏显示“GPU 内存已满”。

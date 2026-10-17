@@ -431,7 +431,7 @@ fn dispatch(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlRequest) 
             // `engine.execute` is programmatic: engine commands run directly with their default
             // params and never open a dialog (an agent would otherwise get a modal instead of a
             // result). `ui.menu.invoke` behaves like a menu click, so it may open the dialog.
-            if req.method == "engine.execute" && photocraft_engine::commands::find(id).is_some() {
+            if req.method == "engine.execute" && app.session.has_command(id) {
                 return run_waiting(app, wait, |app| app.run(id, params));
             }
             run_waiting(app, wait, |app| crate::menus::invoke(app, ctx, id, params))

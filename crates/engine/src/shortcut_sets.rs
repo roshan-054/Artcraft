@@ -249,12 +249,21 @@ pub struct Bound {
 /// Every bindable command with a key under the bindings of `p`: the engine's and the shell's
 /// commands, the tools and the temporary tools ([`crate::prefs::bindable_items`]).
 pub fn bound(p: &Preferences) -> Vec<Bound> {
-    crate::prefs::bindable_items()
+    bound_items(p, crate::prefs::bindable_items().map(|(id, label, menu, def, kind)| (id, label, menu.first().copied(), def, kind)))
+}
+
+/// Build exports from the caller's complete command snapshot, including installed plugins.
+pub(crate) fn bound_items<'a>(
+    p: &Preferences,
+    items: impl IntoIterator<Item = (&'a str, &'a str, Option<&'a str>, Option<&'a str>, crate::prefs::BindKind)>,
+) -> Vec<Bound> {
+    items
+        .into_iter()
         .filter_map(|(id, label, menu, def, kind)| {
             let main = p.shortcut(id, def);
             let mut keys: Vec<String> = main.and_then(normalize_shortcut).into_iter().collect();
             keys.extend(p.alternates(id, main));
-            let menu = menu.first().copied().unwrap_or("Other").to_string();
+            let menu = menu.unwrap_or("Other").to_string();
             (!keys.is_empty()).then(|| Bound { id: id.to_string(), label: label.to_string(), menu, keys, tool: kind == crate::prefs::BindKind::Tool })
         })
         .collect()

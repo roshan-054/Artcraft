@@ -29,8 +29,8 @@ fn index(p: &Value, key: &str, cmd: &str) -> Result<Option<usize>> {
 
 /// Whether `id` can be a step: a registered command, a Play Action call, or one of the desktop
 /// shell's recorded save/view commands.
-fn is_step_command(id: &str) -> bool {
-    crate::commands::find(id).is_some() || id == "actions.play" || crate::actions_cmds::shell_save_command(id) || crate::actions_cmds::shell_view_command(id)
+fn is_step_command(s: &Session, id: &str) -> bool {
+    s.has_command(id) || id == "actions.play" || crate::actions_cmds::shell_save_command(id) || crate::actions_cmds::shell_view_command(id)
 }
 
 fn insert(s: &mut Session, p: &Value) -> Result<Value> {
@@ -41,7 +41,7 @@ fn insert(s: &mut Session, p: &Value) -> Result<Value> {
         Some(Value::String(id)) if !id.trim().is_empty() => id.trim().to_string(),
         _ => return Err(bad(cmd, "needs `id`, the command the step runs")),
     };
-    if !is_step_command(&id) {
+    if !is_step_command(s, &id) {
         return Err(bad(cmd, format!("unknown command `{id}`")));
     }
     let params = match p.get("params") {

@@ -1,5 +1,19 @@
 # Development guide
 
+For independent plugins, start with the [plugin developer handbook](plugin-development.md).
+It covers separate panel/filter projects, neutral starters, API contracts, testing and releases.
+
+The optional [guest SDK](plugin-sdk.md) provides typed contracts and standalone project
+generation from one authoring manifest. Panels use the PhotoCraft Plugin API.
+Filter, package and worker formats are separate contracts.
+See [store safety](plugin-safety.md#cooperative-store-locking) for native job leases,
+cross-process management contention and the remaining lifecycle work.
+This page covers development of the PhotoCraft host application.
+
+For plugin recovery, the desktop accepts `--disable-plugins` to skip plugin loading and block
+plugin execution for one launch. It retains saved settings and installed files; see
+[plugin safety and recovery](plugin-safety.md#start-without-plugins).
+
 ## Prerequisites
 
 - Rust stable (1.95+). Add the web target with `rustup target add wasm32-unknown-unknown`.
@@ -592,3 +606,12 @@ backend command without submitting; it writes a PDF only when `output` is explic
 without an output requires `dryRun: true`. Remembered print settings omit `output`, `dryRun` and
 `send`, so Print One Copy derives submission from its own output choice. Shared spooler transport
 files are automatically removed on Windows; CUPS needs none.
+
+
+Plugin lifecycle implementation lives in `engine/src/extension_package/`, `plugin_scheduler.rs`
+and `plugin_runtime/worker_v2.rs`. Preserve metadata-only dormant discovery, exact ownership
+validation at activation, source/destination generation leases for managed migrations, and
+scoped cancellation/resource credits. Public lifecycle administration remains command-driven
+(`extension.runtime`, `extension.storage`, `extension.rollback`). Reset is a scheduled job;
+never wait for a native acknowledgement during UI painting. See [lifecycle](plugin-lifecycle.md)
+and the [single evolving API policy](plugin-sdk.md#compatibility-and-evolution-policy).

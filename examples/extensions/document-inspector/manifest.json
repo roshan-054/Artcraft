@@ -1,0 +1,15 @@
+{
+  "apiVersion": 1,
+  "id": "org.example.document-inspector",
+  "name": "Document Inspector",
+  "version": "1.0.0",
+  "author": "PhotoCraft contributors",
+  "description": "Read document and layer information in a native view that refreshes when the document changes.",
+  "permissions": {"documentRead": false, "commands": []},
+  "capabilities": {"required": [{"id": "host.document.read", "minVersion": 1}, {"id": "host.events", "minVersion": 1}, {"id": "host.ui.views", "minVersion": 1}], "optional": []},
+  "contributes": {
+    "inspectors": [{"id": "org.example.document-inspector.inspector", "label": "Document Inspector", "event": "inspect"}],
+    "subscriptions": [{"id": "org.example.document-inspector.document_change", "event": "document.changed", "handler": "inspect"}]
+  },
+  "panel": {"fields": [], "buttons": [{"id": "inspect", "label": "Refresh information"}]}
+}

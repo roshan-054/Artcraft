@@ -7,6 +7,8 @@
 # Original translations from the meaning of PhotoCraft's English source keys.
 # No proprietary translation resources were used.
 # Licensed MIT OR Apache-2.0. See LICENSE-translations.txt and ATTRIBUTION.md.
+	Automatic update checks	Автоматична перевірка оновлень
+	Last update check unix secs	Час останньої перевірки оновлень у секундах Unix
 
 # Channel Options and New Spot Channel (#3761)
 	Channel Color	Колір каналу
@@ -3898,6 +3900,14 @@ curves	Smooth	Згладити
 # Free Transform: a new layer while the box is open (#5859)
 	Free Transform is still being applied; try again when it has finished.	Вільне трансформування ще застосовується; спробуйте знову, коли воно завершиться.
 	The transform couldn't be applied.	Не вдалося застосувати трансформування.
+
+# Native-panel extensions
+	Manage Extensions…	Керування розширеннями…
+
+# Plugins menu
+	Plugins	Плагіни
+	Manage Plugins…	Керування плагінами…
+
 # Preferences › Performance › GPU Memory; the status bar and slow-redraw notice
 	Its layers need {needed} of GPU memory; the budget leaves them {budget}.	Його шарам потрібно {needed} пам'яті GPU; бюджет залишає їм {budget}.
 	Set GPU Memory in Preferences › Performance to what your graphics card can hold, at most 3/8 of its memory. Automatic follows Memory Usage, within a quarter of this computer's memory and 3/8 of the card's, and doesn't count the document against a card whose memory is known. The status bar shows GPU Memory Full while they don't fit.	Задайте «Пам'ять GPU» в Налаштування › Продуктивність відповідно до того, скільки вміщує ваша відеокарта, не більше 3/8 її пам'яті. «Автоматично» стежить за використанням пам'яті, у межах чверті пам'яті цього комп'ютера й 3/8 пам'яті відеокарти, і не враховує документ на відеокарті з відомим обсягом пам'яті. Поки шари не вміщуються, рядок стану показує «Пам'ять GPU заповнена».

@@ -17,6 +17,8 @@
 # stay in Latin letters; the trailing "…" of dialog commands is kept.
 # Conventions: menus are nouns (Plik, Edycja, Obraz ...), commands are infinitives (Otwórz…,
 # Zapisz jako…), sentence case as in the English source. Quotes: „…”.
+	Automatic update checks	Automatyczne sprawdzanie aktualizacji
+	Last update check unix secs	Ostatnie sprawdzenie aktualizacji w sekundach Unix
 
 # Channel Options and New Spot Channel (#3761)
 	Channel Color	Kolor kanału
@@ -3797,6 +3799,14 @@ curves	Smooth	Wygładź
 # Free Transform: a new layer while the box is open (#5859)
 	Free Transform is still being applied; try again when it has finished.	Przekształcanie swobodne jest nadal stosowane; spróbuj ponownie, gdy się zakończy.
 	The transform couldn't be applied.	Nie można zastosować przekształcenia.
+
+# Native-panel extensions
+	Manage Extensions…	Zarządzaj rozszerzeniami…
+
+# Plugins menu
+	Plugins	Wtyczki
+	Manage Plugins…	Zarządzaj wtyczkami…
+
 # Preferences › Performance › GPU Memory; the status bar and slow-redraw notice
 	Its layers need {needed} of GPU memory; the budget leaves them {budget}.	Warstwy potrzebują {needed} pamięci GPU; budżet zostawia im {budget}.
 	Set GPU Memory in Preferences › Performance to what your graphics card can hold, at most 3/8 of its memory. Automatic follows Memory Usage, within a quarter of this computer's memory and 3/8 of the card's, and doesn't count the document against a card whose memory is known. The status bar shows GPU Memory Full while they don't fit.	Ustaw Pamięć GPU w Preferencje › Wydajność na tyle, ile zmieści Twoja karta graficzna, najwyżej 3/8 jej pamięci. Automatycznie podąża za Użyciem pamięci, w granicach jednej czwartej pamięci tego komputera i 3/8 pamięci karty, i nie wlicza dokumentu przy karcie o znanej pamięci. Dopóki się nie mieszczą, pasek stanu pokazuje Pamięć GPU pełna.

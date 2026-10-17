@@ -113,7 +113,7 @@ pub(crate) fn apply_to_surface(command: &str, params: &Value, surf: &Surface, se
 /// Largest base64 payload `plugin.install` accepts (the module limit, encoded).
 const MAX_DATA_CHARS: usize = (32 << 20) / 3 * 4 + 4;
 
-fn b64_decode(s: &str) -> Option<Vec<u8>> {
+pub(crate) fn b64_decode(s: &str) -> Option<Vec<u8>> {
     let val = |c: u8| -> Option<u32> {
         Some(u32::from(match c {
             b'A'..=b'Z' => c - b'A',
@@ -178,6 +178,9 @@ static FOLDER: Mutex<Option<(String, Value)>> = Mutex::new(None);
 /// Loads the Plug-ins preference folder (`*.wasm`) when it is enabled and has changed since the
 /// last load. Called whenever preferences are applied (startup, `prefs.set`). Native only.
 pub(crate) fn sync_prefs(s: &Session) {
+    if s.plugins_disabled {
+        return;
+    }
     let pi = &s.prefs().plug_ins;
     let folder = pi.additional_plugins_folder.trim();
     if !pi.use_additional_plugins_folder || folder.is_empty() {
@@ -238,7 +241,7 @@ pub fn specs() -> Vec<CommandSpec> {
         CommandSpec {
             id: "plugin.install",
             label: "Install Plug-in…",
-            menu: &["Filter", "Plug-ins"],
+            menu: &["Plugins"],
             shortcut: None,
             params: r##"{"path":text,"data":json,"replace":bool=true} (path: a .wasm file, native only; data: the module as base64)"##,
             enabled: always,

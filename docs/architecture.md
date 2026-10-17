@@ -1,6 +1,6 @@
 # PhotoCraft architecture
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-13 · **Change:** minor (workspace size and test counts recounted; current-state summary added; the design plan below is kept, with its deviations listed) · **Target:** Adobe Photoshop 2026
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-16 · **Change:** minor (standalone typed plugin SDK and manifest generation; lazy plugin activation, persistent workers, fair scheduling, generation leases and managed-state rollback; generic plugin-owned processing; general image plugin package v2 and owned native/WASM processors; workspace size and test counts recounted; current-state summary added; the design plan below is kept, with its deviations listed) · **Target:** Adobe Photoshop 2026
 
 ## Current state (2026-10-10)
 
@@ -22,6 +22,16 @@ What exists on `main` today. The numbered sections below are the original design
 - **Files:** own PSD/PSB crate (`psd`), flat codecs (`codecs`), camera raw (`raw`), HEIF (`heif`),
   Affinity (`affinity`), document mapping (`io`), native `.pcraft` (`format`, atomic saves).
   Coverage: [`file-format-parity.md`](file-format-parity.md).
+- **Extensions (2026-10-15):** installable native panels with sandboxed WebAssembly event handlers,
+  explicit editing-command grants, a persistent desktop store and a top-level Plugins menu. Version 2
+  packages may supply their own native image worker and/or sandboxed pixel filters through
+  `plugin.processImage`, without registering a new host service. The host owns source snapshots,
+  colour conversion, jobs, cancellation, comparison previews and confirmed result application.
+  AI algorithms, models and runtime libraries remain entirely in their version-2 packages; see [`extensions.md`](extensions.md) and
+  [`plugin-image-processing.md`](plugin-image-processing.md).
+  Native packages can also declare `plugin.runTask` for explicit document-independent work
+  in their own worker, with bounded JSON results, progress/cancellation and installation leases;
+  see [`plugin-native-tasks.md`](plugin-native-tasks.md).
 - **Not built (yet) from the plan:** the `ml` crate (no ML runtime; see gap G15), plug-in ABI v2.
 - **Deviations from the plan below:** `photocraft-tablet` is the one crate allowed `unsafe`
   (AppKit pen events); `affinity`, `heif` and `raw` crates were added; the phased roadmap in §15
@@ -88,6 +98,7 @@ Sources: [GIMP 2.10 release notes](https://gimp.org/release-notes/gimp-2.10.html
 
 | Property | Rule | Where |
 |---|---|---|
+| 2026-10-16 | minor | Independent API/guest SDK, single-manifest developer tooling, native OS store locks and activation epochs; broader lifecycle phases remain open |
 | **Bit depth** | Every surface carries a runtime `PixelFormat { depth: U8\|U16\|F16\|F32, model, alpha }`. Algorithms are written generically over a `Sample` trait and monomorphized per depth, or run on f32 working buffers and convert at tile edges. No `u8` pixel type appears in any public engine API. CI runs the golden suite at 8, 16 and 32f. | `raster`, `color`, `algo` |
 | **Colour model** | `ColorMode` (RGB, Gray, CMYK, Lab, Indexed, Bitmap, plus multichannel/spot) is in `doc` from the start. Channel count is dynamic (1–N plus alpha plus spot). Only RGB/Gray *rendering* ships first, but the storage, PSD round-trip and conversion paths never assume 3 or 4 channels. | `doc`, `raster`, `psd` |
 | **Colour management** | Every document has an ICC profile. The compositor takes a working-space descriptor. The display transform is a separate final stage. Blending space (gamma vs linear) is a per-document option. | `color`, `compose` |
@@ -155,7 +166,7 @@ photocraft/
 └─ plan/                       this directory
 ```
 
-**What exists today.** This layout is the target design. Built so far: `geom`, `cms`, `color`, `raster`, `psd`, `codecs`, `doc`, `ops`, `algo`, `paint`, `text`, `vector`, `compose`, `gpu`, `format`, `raw`, `io`, `plugins`, `engine`, `ui-egui`, `automation`, `testkit`, and the three apps. Not yet split out: `viewport` and `tools` live inside `ui-egui` and `engine`; `platform` services are function hooks injected by each app (`ui_egui::Services`); `adobe-assets` and `ml` are not started.
+**What exists today.** This layout is the target design. Built so far: `geom`, `cms`, `color`, `raster`, `psd`, `codecs`, `doc`, `ops`, `algo`, `paint`, `text`, `vector`, `compose`, `gpu`, `format`, `raw`, `io`, `plugins`, `plugin-api`, `plugin-sdk`, `engine`, `ui-egui`, `automation`, `testkit`, and the three apps. Not yet split out: `viewport` and `tools` live inside `ui-egui` and `engine`; `platform` services are function hooks injected by each app (`ui_egui::Services`); `adobe-assets` and `ml` are not started.
 
 **Crate granularity:** start with the crates above. Split `algo` into `-adjust`, `-filters`, `-select`, `-inpaint` and `-warp` once any module passes about 10k lines, or once compile times hurt. Its internal module boundaries should already follow those lines.
 
@@ -478,7 +489,7 @@ psd/src/
     access fail closed at the automation boundary.
 - **Actions:** recorded `Vec<CommandInvocation>`, replayable in batch (File → Automate → Batch).
 - **Scripting (later):** embed a scripting language over the same registry. Options are Rhai, or Lua via mlua (C). JS via QuickJS is possible if we want Photoshop-script familiarity.
-- **Plugins:** sandboxed WebAssembly filter plug-ins (`photocraft-plugins`, L4) run by `wasmi`, a pure-Rust interpreter, with fuel, memory, stack and wall-time limits and no host imports. They are driven by the `plugin.*` commands and listed under Filter › Plug-ins; the ABI is in [`plugins.md`](plugins.md). Native Photoshop `.8BF`/CEP/UXP hosting is out of scope (it needs unsafe FFI and can't run on the web). Panel plug-ins are later.
+- **Plugins:** sandboxed WebAssembly filter plug-ins (`photocraft-plugins`, L4) run by `wasmi`, a pure-Rust interpreter, with fuel, memory, stack and wall-time limits and no host imports. They are driven by the `plugin.*` commands and listed under Plugins; the ABI is in [`plugins.md`](plugins.md). Native Photoshop `.8BF`/CEP/UXP hosting is out of scope (it needs unsafe FFI and can't run on the web). Native-panel extensions use a separate versioned API ([`extensions.md`](extensions.md)); self-contained desktop `.pcplugin` packages include their native engine, dependencies and assets through the general image-processing contract (native worker or bundled WASM filters). Algorithm-specific host services are removed. Image processors can stage bounded per-plugin/document comparison transactions (`engine/src/plugin_preview.rs`): its native panel displays before/after and applies only on confirmation, opening a new document or adding a same-size undoable layer. The [PhotoCraft Plugin API](plugin-api.md) provides contributed commands, bounded layer snapshots, atomic rename/visibility edits, document invalidations and read-only inspectors. The independent L0 API and L1 [guest SDK](plugin-sdk.md) provide typed serialized contracts, bounded guest ABI storage and single-manifest generation; plugins never link editor internals. Current desktop hosts use lazy descriptor discovery, fair bounded native queues, cooperative resource admission, private persistent workers and per-generation leases. Optional per-plugin [GitHub release checks](plugin-updates.md) prepare verified updates for review. Managed updates stage data migrations and preserve a rollback pair; [lifecycle](plugin-lifecycle.md) and [store safety](plugin-safety.md#cooperative-store-locking) document the limits. Companion apps use the authenticated [control API](control-protocol.md) or MCP. See the [development guide](plugin-development.md) for core hooks and authoring. Arbitrary panel layouts and broader document, pixel and tool capabilities remain later.
 
 ---
 
@@ -589,6 +600,7 @@ Each phase ends with a demoable build and green CI on all targets. Phases 8–10
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-14 | minor | PhotoCraft Plugin API: installation, bounded WASM events, explicit editing grants and a Rust starter; Photoshop compatibility and broader host APIs remain open; estimates unchanged |
 | 2026-10-13 | minor | Workspace size and `#[test]` counts recounted (393k → 539k lines, 5,460 → 8,040 tests); other current-state figures unchanged |
 | 2026-10-10 | minor | Current-state summary and deviations from the plan; status line; broken link to `photoshop-parity.md` repointed to `target-app-parity.md` |
 | 2026-09-30 | major | Design plan v1 |

@@ -290,7 +290,7 @@ pub enum Started {
 
 /// Commands that never edit the active document, allowed while a job runs on it.
 fn independent_of_document(id: &str) -> bool {
-    const PREFIXES: &[&str] = &["jobs.", "tools.", "view.", "window.", "help.", "brush.presets.", "gradient.presets."];
+    const PREFIXES: &[&str] = &["jobs.", "tools.", "view.", "window.", "help.", "brush.presets.", "gradient.presets.", "extension.updates."];
     const IDS: &[&str] = &["file.new", "file.close", "file.closeAll", "edit.preferences", "edit.colorSettings", "edit.keyboardShortcuts", "edit.menus"];
     PREFIXES.iter().any(|p| id.starts_with(p)) || IDS.contains(&id)
 }
@@ -559,6 +559,8 @@ impl Session {
     /// Apply finished background jobs (on this thread) and return every job that ended since
     /// the last call. Cheap when nothing runs; the UI calls it every frame.
     pub fn poll_jobs(&mut self) -> Vec<JobEvent> {
+        #[cfg(not(target_arch = "wasm32"))]
+        self.extensions.updates.expire();
         let mut i = 0;
         while i < self.jobs.running.len() {
             match self.jobs.running.get(i).map(|r| r.rx.try_recv()) {
@@ -681,6 +683,51 @@ impl Session {
 
     /// Run the command `id`: inline, or (with `background`) as a job when it is one.
     pub(crate) fn dispatch(&mut self, id: &str, params: Value, background: bool) -> Result<Started> {
+        self.extensions.platform.dispatch_depth = self.extensions.platform.dispatch_depth.saturating_add(1);
+        let result = self.dispatch_inner(id, params, background);
+        self.extensions.platform.dispatch_depth = self.extensions.platform.dispatch_depth.saturating_sub(1);
+        if self.extensions.platform.dispatch_depth == 0 {
+            self.pump_plugin_events();
+        }
+        result
+    }
+
+    fn dispatch_inner(&mut self, id: &str, params: Value, background: bool) -> Result<Started> {
+        if crate::commands::find(id).is_none() && crate::plugin_host::is_contributed(self, id) {
+            if !(params.is_object() || params.is_null()) {
+                return Err(EngineError::BadParams { cmd: id.into(), msg: "params must be a JSON object".into() });
+            }
+            if let Some(gate) = self.authorize {
+                gate(id, &params)?;
+            }
+            let _authorization = AuthorizationScope::enter(self.authorize);
+            if let Some(reason) = crate::plugin_host::dynamic_reason(self, id) {
+                return Err(EngineError::Disabled(id.into(), reason));
+            }
+            self.jobs.spawn = background;
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| crate::plugin_host::invoke_command(self, id, &params)))
+                .unwrap_or_else(|_| Err(EngineError::Other(format!("`{id}` failed with an internal plugin error"))));
+            self.jobs.spawn = false;
+            return match (result, self.jobs.pending.take()) {
+                (Err(error), Some(job)) => {
+                    job.ctx.cancel();
+                    Err(error)
+                }
+                (Err(error), None) => Err(error),
+                (Ok(_), Some(mut job)) => {
+                    job.command = id.into();
+                    job.params = params;
+                    job.journal = false;
+                    let jid = job.id;
+                    self.jobs.running.push(job);
+                    Ok(Started::Job(jid))
+                }
+                (Ok(value), None) => {
+                    self.after_command(id, params, false, None);
+                    Ok(Started::Done(value))
+                }
+            };
+        }
         let spec = crate::commands::find(id).ok_or_else(|| EngineError::UnknownCommand(id.to_string()))?;
         // Params are named fields: anything but an object (or null, meaning none) is a caller
         // mistake, not "use every default".
@@ -692,6 +739,9 @@ impl Session {
         // effect.
         if let Some(gate) = self.authorize {
             gate(id, &params)?;
+        }
+        if let Some(why) = self.plugin_recovery_refusal(id) {
+            return Err(EngineError::Disabled(id.to_string(), why));
         }
         let _authorization = AuthorizationScope::enter(self.authorize);
         // Last Filter runs as the filter it repeats: journaled, recorded in an action, faded and
@@ -709,7 +759,9 @@ impl Session {
         crate::param_check::check(spec, &params)?;
         crate::filters::validate_params(id, &params)?;
         // A floating selection drops before any other command (Undo puts it back instead).
-        if let Some(v) = crate::float_cmds::before_command(self, id)? {
+        if !crate::plugin_host::preserves_floating(self, id, &params)
+            && let Some(v) = crate::float_cmds::before_command(self, id)?
+        {
             return Ok(Started::Done(v));
         }
         // Pixel commands follow the Channels panel target unless the caller names one.

@@ -28,6 +28,8 @@ crates/
   geom cms color raster      L0 foundation (geometry, ICC colour management, pixel formats + blend math, COW tiles)
   psd codecs                 L0 standalone format crates (no workspace deps; publishable)
   tablet                     L0 standalone pen tablet input (macOS AppKit, X11 XInput2); the one isolated unsafe crate
+  plugin-api                 L0 independent serialized plugin contracts, validation and generated schemas
+  plugin-sdk                 L1 independent guest ABI buffers, typed messages and optional authoring generator
   doc                        L1 document model (layers, masks, adjustments, effects, smart objects: pure data)
   ops paint algo text vector L2 history, brush engine, imaging algorithms, type engine, paths/shapes
   compose gpu format         L3 CPU compositor (the oracle), wgpu compositor, .pcraft native format
@@ -38,6 +40,7 @@ crates/
 apps/
   photocraft                 desktop app (eframe/wgpu), TCP control server
   photocraft-cli             headless CLI (convert/info/run/batch/commands/mcp)
+  photocraft-plugin          optional standalone plugin developer tooling and private SDK source export
   photocraft-web             the same app in the browser (trunk + wasm-bindgen)
   photocraft-web-boot        starts the packaged browser app from compressed parts of its wasm (no file over a host's size cap)
 xtask/                       cargo xtask layers | wasm | ci | stats | corpus | test-corpus | parity | perf | scorecard
@@ -52,7 +55,7 @@ xtask/                       cargo xtask layers | wasm | ci | stats | corpus | t
 People trust PhotoCraft with their work, and a crash loses it. A malformed file, a bad command or MCP param, a corrupt settings file, an odd keystroke or a full disk must produce an error the user or agent can act on, never a panic. Don't ship a feature by adding a panic path; fix a crash before building on top of it. The shared standard is `../craftrules/standards/never-crash.md`.
 
 - **Non-test code never panics.** No `unwrap()`, `expect()`, `panic!`, `unreachable!`, `todo!` or `unimplemented!`. Return the crate's error type and propagate with `?`; use `ok_or(..)?`, `let .. else { return Err(..) }`, `if let`, or `unwrap_or*` where a fallback is truly correct (never one that silently corrupts a document). Unfinished features return an "unsupported" error. The only exception is a provably infallible literal: `#[allow(clippy::expect_used)]` plus `.expect("why it can't fail")`.
-- **No `unsafe`.** The workspace sets `unsafe_code = "forbid"`. The one exception is the isolated helper crate `photocraft-tablet` (`crates/tablet`): winit drops pen tablet data, and reading it on macOS needs an AppKit event monitor (Objective-C interop). Only its `src/macos.rs` allows `unsafe` (`unsafe_code = "deny"` crate-wide, every block has a `SAFETY:` comment, tested against real `NSEvent`s); its X11 path and all mapping code are safe. Don't add `unsafe` anywhere else.
+- **No unsafe operations.** The workspace sets `unsafe_code = "forbid"`. The one exception is the isolated helper crate `photocraft-tablet` (`crates/tablet`): winit drops pen tablet data, and reading it on macOS needs an AppKit event monitor (Objective-C interop). Only its `src/macos.rs` allows `unsafe` (`unsafe_code = "deny"` crate-wide, every block has a `SAFETY:` comment, tested against real `NSEvent`s); its X11 path and all mapping code are safe. Don't add unsafe operations anywhere else. The guest SDK export macro narrowly allows Rust 2024 `#[unsafe(export_name)]` attributes to name the four existing ABI symbols in a guest crate using `deny(unsafe_code)`. Those functions contain no unsafe operations. This exception does not permit raw pointer dereferencing, unsafe blocks or editor-core FFI.
 - **Input-derived numbers are hostile.** Use `get()` rather than `[i]`/`[a..b]` for indices from files, params, selections or arithmetic on them; slice strings only at char boundaries; use `checked_*`/`saturating_*` for lengths, offsets and counts; guard division by zero and NaN/inf casts; cap allocations sized by input.
 - **Bound recursion** with depth limits or seen-sets (documents can be deep or cyclic).
 - **Don't cascade.** Handle lock poisoning (`lock().unwrap_or_else(PoisonError::into_inner)`) and treat thread joins as `Result`s.
@@ -132,6 +135,65 @@ Then append a terse entry to `log/devlog.md` (what landed, numbers, what's still
 - `../craftrules/release/playbook.md`: how every storytold app builds signed release binaries (the canonical recipe; `docs/release-playbook.md` just points there); `docs/releasing.md` is PhotoCraft's specifics.
 - `plan/` (local, gitignored): research, parity plan, execution plan, estimates.
 - `log/` (local, gitignored): the dev log.
+
+## Plugin platform ownership and contracts
+
+Read `docs/plugin-development.md`, `docs/plugin-sdk.md`, `docs/plugin-api.md` and
+`docs/plugin-platform-plan.md` before changing the platform. Public SDK/API crates must
+build independently of engine/UI sources. New guests can use `photocraft-plugin new`
+with one `authoring.json`; generated manifests and bindings belong in Cargo `OUT_DIR`.
+Support one PhotoCraft Plugin API. Its internal wire discriminator is `1`. SDK use is
+optional. Extend the API until a genuine breaking change requires another major. Filter ABI 1,
+package format 2 and native worker protocols 1/2 are independent and remain supported.
+
+Feature algorithms, model catalogs, binaries, licenses and acceptance suites for separately
+released plugins belong in those plugins' repositories. Keep core regressions neutral and
+extend existing suites; generated SDK acceptance projects and packages stay temporary.
+Regenerate all public JSON Schema snapshots when their Rust contracts change.
+
+Optional GitHub release metadata belongs to each plugin's embedded descriptor. Keep release
+checks/downloads off the UI thread; bind candidates to the installed identity/source/hash,
+verify digest/version/compatibility and use the existing reviewed store transaction. Never
+silently expand grants, downgrade a release or derive update repositories from plugin IDs.
+Desktop automatic discovery waits until startup settles and the app is idle, respects the
+persisted daily attempt cooldown and opt-out, and stays quiet on failure. Recovery, restricted
+automation, browser and headless sessions do not schedule it. Downloads and installation need review.
+Read docs/plugin-updates.md before changing this path. docs/plugin-marketplace.md is a future
+design only; do not add a placeholder marketplace or a second installation/runtime path.
+
+Discovery uses host-created cached descriptors. Panel activation reads only bounded panel
+code; scheduled jobs stream-verify the full closure before native execution or filter loading.
+Never hash model payloads or compile package filters during UI preparation. Compare the embedded
+panel descriptor with its cached authority. Store records without a cached descriptor may use
+eager discovery for a panel implementing the API.
+Keep rejected installations in the separate non-executable recovery registry. Bind their
+review/removal to the record fingerprint and activation captured at discovery; do not weaken
+concurrent-host guards to repair an incompatible plugin. Managed data stays intact by default,
+and corrupt metadata never authorizes deleting unverified payloads or another plugin's files.
+Worker protocol 2 is an explicit verified runtime/worker-v2.json opt-in; never probe or silently
+change a worker's declared launch contract. Each installation/generation owns its persistent process and data.
+
+Use the bounded process-wide scheduler for native work. Scheduling/cancellation identities must
+include the private store, plugin, generation, activation epoch and private runtime instance; a same-named plugin in another
+store must not supply resident credits or receive cancellation. Admission estimates are not OS
+containment. Restricted native execution remains unavailable until Phase 7 verifies it per OS.
+
+An OS store lock serializes installation/publication; execution and idle workers retain per-generation leases.
+Explicitly unlock when the owning guard ends; a Unix subprocess may temporarily inherit a duplicate descriptor.
+Independent live leases must continue to block mutation.
+Never replace/delete lock files or activation tombstones. Managed-data migration requires an
+exclusive source-generation lease, stages a private snapshot, validates quotas and publishes the
+active code/state record last. Preserve one rollback pair and never touch external plugin caches.
+Bind the rollback journal to the target active hash so failed publication preserves the earlier
+rollback choice. Completion, broker requests and Apply recheck ownership, source revision and
+activation authority; keep a short shared store guard through final document/state admission.
+Retained previews have explicit byte/count budgets and cannot silently evict another owner's work.
+
+Update developer docs, this guide and the plugin developer skill with completed features and
+actual limits. Extend existing neutral suites with process/crash/cancel/store/rollback coverage;
+compile temporary native fixtures outside shipped source and remove generated projects/packages.
+Record completed platform changes and compatibility notes in `docs/plugin-changelog.md`.
+Independent plugins maintain release history in their own repositories' `CHANGELOG.md` files.
 
 ## 8. Keeping the native format complete
 

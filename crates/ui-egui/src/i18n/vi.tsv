@@ -18,6 +18,8 @@
 # names (PhotoCraft, ArtCraft, OpenType, RGB, CMYK, Lab, PSD, PNG, JPEG, WebP, OpenEXR, AVIF …)
 # stay as they are; the trailing "…" of dialog commands is kept. Plural rule: one form
 # (`plural_none` in i18n/mod.rs).
+	Automatic update checks	Tự động kiểm tra bản cập nhật
+	Last update check unix secs	Lần kiểm tra cập nhật gần nhất tính bằng giây Unix
 
 
 # Channel Options and New Spot Channel (#3761)
@@ -3685,6 +3687,14 @@ curves	Smooth	Làm mượt
 # Free Transform: a new layer while the box is open (#5859)
 	Free Transform is still being applied; try again when it has finished.	Biến đổi tự do vẫn đang được áp dụng; hãy thử lại khi hoàn tất.
 	The transform couldn't be applied.	Không thể áp dụng phép biến đổi.
+
+# Native-panel extensions
+	Manage Extensions…	Quản lý tiện ích mở rộng…
+
+# Plugins menu
+	Plugins	Plugin
+	Manage Plugins…	Quản lý plugin…
+
 # Preferences › Performance › GPU Memory; the status bar and slow-redraw notice
 	Its layers need {needed} of GPU memory; the budget leaves them {budget}.	Các lớp cần {needed} bộ nhớ GPU; ngân sách chỉ dành cho chúng {budget}.
 	Set GPU Memory in Preferences › Performance to what your graphics card can hold, at most 3/8 of its memory. Automatic follows Memory Usage, within a quarter of this computer's memory and 3/8 of the card's, and doesn't count the document against a card whose memory is known. The status bar shows GPU Memory Full while they don't fit.	Đặt Bộ nhớ GPU trong Tùy chọn › Hiệu năng bằng mức card đồ họa của bạn chứa được, tối đa 3/8 bộ nhớ của card. Tự động theo mức sử dụng bộ nhớ, trong giới hạn một phần tư bộ nhớ máy này và 3/8 bộ nhớ card, và không tính tài liệu vào card đã biết dung lượng bộ nhớ. Khi chúng chưa vừa, thanh trạng thái hiện Bộ nhớ GPU đầy.

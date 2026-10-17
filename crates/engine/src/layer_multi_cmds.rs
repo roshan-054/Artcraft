@@ -82,6 +82,7 @@ pub fn set_selection(s: &mut Session, ids: Vec<LayerId>, active: Option<LayerId>
         st.saved_revision = st.revision;
     }
     st.last_damage = Some(Rect::EMPTY);
+    s.plugin_document_changed();
     Ok(())
 }
 

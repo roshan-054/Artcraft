@@ -14,6 +14,8 @@
 # proprietary localisation resource, string table or product UI was consulted or copied; add
 # entries the same way. Product and technology names (PhotoCraft, ArtCraft, OpenType, CMYK, Lab ...)
 # stay as they are; the trailing "…" of dialog commands is kept.
+	Automatic update checks	Verificar atualizações automaticamente
+	Last update check unix secs	Última verificação de atualizações em segundos Unix
 
 # Channel Options and New Spot Channel (#3761)
 	Channel Color	Cor do canal
@@ -3989,6 +3991,14 @@ layerLabel	No Color	Sem cor
 # Free Transform: a new layer while the box is open (#5859)
 	Free Transform is still being applied; try again when it has finished.	A Transformação livre ainda está sendo aplicada; tente novamente quando terminar.
 	The transform couldn't be applied.	Não foi possível aplicar a transformação.
+
+# Native-panel extensions
+	Manage Extensions…	Gerenciar extensões…
+
+# Plugins menu
+	Plugins	Plugins
+	Manage Plugins…	Gerenciar plugins…
+
 # Preferences › Performance › GPU Memory; the status bar and slow-redraw notice
 	Its layers need {needed} of GPU memory; the budget leaves them {budget}.	As camadas precisam de {needed} de memória da GPU; o orçamento lhes deixa {budget}.
 	Set GPU Memory in Preferences › Performance to what your graphics card can hold, at most 3/8 of its memory. Automatic follows Memory Usage, within a quarter of this computer's memory and 3/8 of the card's, and doesn't count the document against a card whose memory is known. The status bar shows GPU Memory Full while they don't fit.	Ajuste Memória da GPU em Preferências › Desempenho para o que sua placa de vídeo comporta, no máximo 3/8 da memória dela. Automático segue Uso de memória, dentro de um quarto da memória deste computador e 3/8 da memória da placa, e não desconta o documento de uma placa cuja memória é conhecida. Enquanto não couberem, a barra de status mostra Memória da GPU cheia.

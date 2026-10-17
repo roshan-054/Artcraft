@@ -1188,6 +1188,8 @@ pub struct UiState {
     /// Preset panels (Gradients, Patterns, Styles, Shapes, Tool Presets, Clone Source).
     #[serde(default)]
     pub presets_ui: crate::preset_panels::PresetUi,
+    #[serde(default)]
+    pub extensions: crate::extension_ui::ExtensionUi,
     /// Character/Paragraph Styles, Glyphs and Check Spelling (see `type_panels_ui`).
     #[serde(default)]
     pub type_panels: crate::type_panels_ui::TypePanelsUi,
@@ -1365,6 +1367,7 @@ impl Default for UiState {
             workspace: "Essentials".into(),
             palette_open: false,
             dock_tabs: DockTabs::default(),
+            extensions: Default::default(),
             dock: Default::default(),
             docking: None,
             docking_hidden: Default::default(),

@@ -1,5 +1,15 @@
 # Plug-ins: the WebAssembly plug-in API (ABI v1)
 
+For installable tools with native panels and editing actions, see [PhotoCraft extensions](extensions.md).
+The [plugin development guide](plugin-development.md) explains the two APIs and the core integration.
+The filter ABI documented here remains compatible.
+
+To attach your own pixel algorithm to a panel, include its WASM module in a version-2
+`.pcplugin` and call `plugin.processImage` with the embedded filter id. The
+[independent image-processing tutorial](plugin-image-processing.md) includes a complete neutral
+starter. Those private packaged filters process a normalized 8-bit RGBA sRGB composite and
+do not register globally; standalone `plugin.run` below retains its usual depth/target contract.
+
 PhotoCraft does not host native Photoshop plug-ins (`.8BF`, CEP, UXP): that needs unsafe FFI into
 arbitrary machine code and cannot work in the browser build. Instead, plug-ins are **WebAssembly
 modules** run in a sandbox. One `.wasm` file works on macOS, Windows, Linux and the web.
@@ -17,8 +27,11 @@ This page is the contract for plug-in authors and the reference for the host
 | `plugin.remove` | `{"id": "…"}` | Uninstalls. |
 | `plugin.reload` | `{"path": "folder"}` (default: the preference folder) | Loads every `*.wasm` in a folder; a bad module is reported and skipped. |
 
-In the app, installed filters appear under **Filter › Plug-ins** (with a generated dialog and live
+In the app, installed filters appear under **Plugins** (with a generated dialog and live
 preview when they have parameters), next to **Install Plug-in…**.
+That menu opens the shared installer: use **Browse…** or enter a path and inspect the file,
+or drop one `.wasm` file into its window. A validated pixel filter opens **Install Filter**;
+confirming it calls `plugin.install`, with replacement disabled until explicitly selected.
 
 **Preference folder.** Edit › Preferences › Plug-ins › *Use Additional Plug-ins Folder* plus
 *Additional Plug-ins Folder*: when both are set, every `*.wasm` in that folder (not recursive) is
@@ -146,18 +159,26 @@ position-dependent filters (gradients, vignettes) are seamless across bands.
 
 ## Writing a plug-in in Rust
 
-[`examples/plugins/invert-rs`](../examples/plugins/invert-rs) is a complete `no_std` plug-in
-(no allocator, under 1 KiB built). Build it with:
+Use the independent [Channel Gain starter](../examples/plugins/filter-starter/README.md).
+It includes an embedded manifest, safe owned ABI buffers, RGB/grayscale sample processing,
+native unit tests, a lockfile and build scripts for Windows and POSIX systems. The
+[general handbook](plugin-development.md#build-a-pixel-filter) explains the full workflow.
 
 ```sh
 rustup target add wasm32-unknown-unknown
-examples/plugins/invert-rs/build.sh      # cargo build --release --target wasm32-unknown-unknown
+cd examples/plugins/filter-starter
+cargo test --locked
+cargo build --locked --release --target wasm32-unknown-unknown
 ```
 
-The script also refreshes `crates/plugins/tests/fixtures/invert.wasm`, the test fixture built from
-that source. Any language that targets core WebAssembly works (C, Zig, AssemblyScript, WAT…), as
-long as the module has no imports: in Rust, that means `no_std` or a `std` build that never touches
-WASI.
+Run `build.ps1` on Windows or `sh build.sh` on macOS/Linux to copy the output to
+`Channel-Gain.wasm`, then install through Plugins > Install Plug-in… . These scripts modify
+only the starter's build outputs, not editor test fixtures. Use `std` only without imported
+OS facilities, or write an import-free `no_std` guest. Other languages can implement the same
+core WASM ABI when their toolchain produces no imports.
+
+The older [`invert-rs`](../examples/plugins/invert-rs) is retained as a minimal host fixture.
+Its build script refreshes an editor fixture and is intended for host maintainers.
 
 ## Performance
 
@@ -169,8 +190,8 @@ RGBA 8-bit layer (24 MP, release, 14-core Apple Silicon under heavy load) took 1
 `cargo run --release -p photocraft-plugins --example bench_invert`). Peak extra memory is about three bands per worker thread (input,
 original for the selection blend, and the instance's memory), i.e. ~12 MiB per thread.
 
-## Not in v1
+## Not in the filter ABI v1
 
-- Panel / UI plug-ins, plug-ins that read other layers or documents, host callbacks (progress,
-  cancel), plug-in-provided file formats.
+- Native panels use the separate [panel API](extensions.md); the filter ABI does not provide
+  panels, other-layer/document reads, progress/cancel callbacks or file-format registration.
 - Filter › Last Filter does not repeat plug-in runs yet.

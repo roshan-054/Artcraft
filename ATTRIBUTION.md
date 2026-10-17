@@ -99,9 +99,21 @@ Artwork shown in the screenshots (all public domain, via Wikimedia Commons; deta
 | `photocraft-type.jpg` | *Among the Sierra Nevada, California*, Albert Bierstadt, 1868 | [Commons](https://commons.wikimedia.org/wiki/File:Albert_Bierstadt_-_Among_the_Sierra_Nevada,_California_-_Google_Art_Project.jpg) |
 | `photocraft-export-light.jpg` | *The Kiss*, Gustav Klimt, 1907–1908 | [Commons](https://commons.wikimedia.org/wiki/File:Gustav_Klimt_016.jpg) |
 
-## Test data (not committed, not shipped)
+## Compatibility test fixtures (not bundled in the app)
 
-`corpus/` is gitignored and no test fixtures are committed to the repository.
+These fixed WASM modules are compiled neutral examples used to test the generic host.
+They are test inputs, not built-in plugins or runtime dependencies. Independently released
+plugins and their notices, native workers, libraries and models stay in their own repositories. Fixture identities
+and use are documented in [`tests/plugin-compatibility/README.md`](tests/plugin-compatibility/README.md).
+
+| Path | Title | Author | Source | License |
+|---|---|---|---|---|
+| `tests/plugin-compatibility/frozen/image-gain-panel.wasm` | Neutral panel fixture for the current PhotoCraft Plugin API | PhotoCraft contributors | Built independently from `examples/extensions/image-plugin-starter`; hash pinned in `tests/plugin-compatibility/catalog.json`; licenses under `tests/plugin-compatibility/licenses` | MIT OR Apache-2.0 |
+| `tests/plugin-compatibility/frozen/channel-gain-filter-v1.wasm` | Frozen neutral filter ABI fixture | PhotoCraft contributors | Exact compiled Channel Gain payload pinned in `tests/plugin-compatibility/catalog.json`; licenses under `tests/plugin-compatibility/licenses` | MIT OR Apache-2.0 |
+
+## Downloaded test corpora (not committed, not shipped)
+
+`corpus/` is gitignored; its downloaded files are not committed to the repository.
 `cargo xtask corpus --all` fetches every corpus at the pinned commits in `xtask/src/corpus_pins.rs`
 and verifies each file against the sha256 lists in `xtask/*.sha256`, with the upstream licence
 next to the files:

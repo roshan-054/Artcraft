@@ -61,6 +61,11 @@ pub fn bindings(app: &PhotocraftApp) -> Vec<(String, KeyboardShortcut)> {
     };
     let ui = crate::menus::UI_COMMANDS.iter().map(|(id, _, _, sc)| (*id, if aliased(id, *sc) { None } else { prefs.shortcut(id, *sc).map(str::to_string) }));
     let engine = photocraft_engine::command_specs().iter().map(|c| (c.id, prefs.shortcut(c.id, c.shortcut).map(str::to_string)));
+    let plugin_commands = app.session.plugin_command_entries();
+    let plugins = plugin_commands.iter().filter_map(|command| {
+        let id = command.get("id")?.as_str()?;
+        Some((id, prefs.shortcut(id, command.get("shortcut").and_then(serde_json::Value::as_str)).map(str::to_owned)))
+    });
     let own: std::collections::HashSet<&str> = crate::menus::UI_COMMANDS
         .iter()
         .map(|c| c.0)
@@ -76,7 +81,7 @@ pub fn bindings(app: &PhotocraftApp) -> Vec<(String, KeyboardShortcut)> {
         .filter(|(id, sc)| {
             !sc.is_empty()
                 && !id.starts_with(crate::actions::SHORTCUT_PREFIX)
-                && photocraft_engine::commands::find(id).is_none()
+                && !app.session.has_command(id)
                 && !crate::menus::UI_COMMANDS.iter().any(|c| c.0 == id.as_str())
                 && !crate::hold_keys::is_temporary(id)
         })
@@ -87,6 +92,7 @@ pub fn bindings(app: &PhotocraftApp) -> Vec<(String, KeyboardShortcut)> {
     let mut candidates: Vec<(&str, Option<String>, bool)> = actions
         .chain(ui)
         .chain(engine)
+        .chain(plugins)
         .chain(catalog)
         .chain(overrides)
         .map(|(id, sc)| {
@@ -319,7 +325,7 @@ fn clip_key_command(app: &PhotocraftApp, id: String) -> String {
 
 /// Why `id` can't run now (the engine's reason when it has one).
 pub fn disabled_reason(app: &PhotocraftApp, id: &str) -> String {
-    photocraft_engine::commands::find(id).and_then(|_| app.session.disabled_reason_with(id, &app.with_mask_target(id, serde_json::Value::Null))).unwrap_or_else(
+    app.session.has_command(id).then(|| app.session.disabled_reason_with(id, &app.with_mask_target(id, serde_json::Value::Null))).flatten().unwrap_or_else(
         || match id {
             "tools.decreaseBrushHardness" | "tools.increaseBrushHardness" => "the current tool has no brush tip".into(),
             _ if app.session.active().is_none() => "no document open".into(),
@@ -328,14 +334,23 @@ pub fn disabled_reason(app: &PhotocraftApp, id: &str) -> String {
     )
 }
 
-fn label(id: &str) -> String {
-    crate::menu_catalog::CATALOG
+fn label(app: &PhotocraftApp, id: &str) -> String {
+    let builtin = crate::menu_catalog::CATALOG
         .iter()
         .find(|c| c.3 == id)
         .map(|c| c.1)
         .or_else(|| crate::menus::UI_COMMANDS.iter().find(|c| c.0 == id).map(|c| c.1))
         .or_else(|| photocraft_engine::commands::find(id).map(|c| c.label))
-        .or_else(|| crate::tool_shortcuts::tool(id).map(|tool| tool.label()))
+        .or_else(|| crate::tool_shortcuts::tool(id).map(|tool| tool.label()));
+    let plugin_commands = app.session.plugin_command_entries();
+    builtin
+        .or_else(|| {
+            plugin_commands
+                .iter()
+                .find(|command| command.get("id").and_then(serde_json::Value::as_str) == Some(id))
+                .and_then(|command| command.get("label"))
+                .and_then(serde_json::Value::as_str)
+        })
         .unwrap_or(id)
         .trim_end_matches('…')
         .to_string()
@@ -348,7 +363,7 @@ pub fn dispatch(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str) {
     let outcome = if !crate::menus::is_enabled(app, command_id) {
         let why = disabled_reason(app, command_id);
         let template = "{label} is not available: {reason}";
-        app.ui.status = crate::i18n::fmt(tl!(template), &[("label", crate::i18n::tr_id(crate::i18n::current(), id, &label(id))), ("reason", tl!(&why))]);
+        app.ui.status = crate::i18n::fmt(tl!(template), &[("label", crate::i18n::tr_id(crate::i18n::current(), id, &label(app, id))), ("reason", tl!(&why))]);
         app.ui.status_error = true;
         Outcome::Disabled(why)
     } else if ctx.data(|d| d.get_temp::<bool>(dry_run_id())).unwrap_or(false) {

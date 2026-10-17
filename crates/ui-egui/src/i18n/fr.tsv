@@ -18,6 +18,8 @@
 # « : ; ? ! » and "%", and inside guillemets « … ». Product and technology names (PhotoCraft,
 # ArtCraft, OpenType, Lab ...) stay as they are; RGB/CMYK read RVB/CMJN; the trailing "…" of
 # dialog commands is kept.
+	Automatic update checks	Vérifier automatiquement les mises à jour
+	Last update check unix secs	Dernière recherche de mises à jour en secondes Unix
 
 # Channel Options and New Spot Channel (#3761)
 	Channel Color	Couleur de la couche
@@ -3204,6 +3206,14 @@ curves	Smooth	Lisser
 # Free Transform: a new layer while the box is open (#5859)
 	Free Transform is still being applied; try again when it has finished.	La transformation manuelle est encore en cours d'application ; réessayez quand elle sera terminée.
 	The transform couldn't be applied.	Impossible d'appliquer la transformation.
+
+# Native-panel extensions
+	Manage Extensions…	Gérer les extensions…
+
+# Plugins menu
+	Plugins	Modules externes
+	Manage Plugins…	Gérer les modules externes…
+
 # Preferences › Performance › GPU Memory; the status bar and slow-redraw notice
 	Its layers need {needed} of GPU memory; the budget leaves them {budget}.	Ses calques ont besoin de {needed} de mémoire GPU ; le budget leur laisse {budget}.
 	Set GPU Memory in Preferences › Performance to what your graphics card can hold, at most 3/8 of its memory. Automatic follows Memory Usage, within a quarter of this computer's memory and 3/8 of the card's, and doesn't count the document against a card whose memory is known. The status bar shows GPU Memory Full while they don't fit.	Réglez Mémoire GPU dans Préférences › Performances sur ce que votre carte graphique peut contenir, au plus 3/8 de sa mémoire. Automatique suit Utilisation de la mémoire, dans la limite du quart de la mémoire de cet ordinateur et des 3/8 de celle de la carte, et ne compte pas le document sur une carte dont la mémoire est connue. Tant qu'ils ne tiennent pas, la barre d'état affiche Mémoire GPU pleine.

@@ -1,0 +1,26 @@
+{
+  "apiVersion": 1,
+  "id": "org.photocraft.quick-tools",
+  "name": "Quick Tools",
+  "version": "1.0.0",
+  "author": "PhotoCraft contributors",
+  "description": "A native panel for resizing images, adding layers and inverting colors.",
+  "permissions": {
+    "documentRead": true,
+    "commands": ["image.imageSize", "layer.new.layer", "image.adjustments.invert"]
+  },
+  "capabilities": {
+    "required": [{"id": "host.commands.invoke", "minVersion": 1}]
+  },
+  "panel": {
+    "fields": [
+      {"id": "percent", "label": "Image size (%)", "type": "int", "min": 25, "max": 400, "default": 200},
+      {"id": "resample", "label": "Resampling", "type": "choice", "options": ["lanczos", "bicubic", "nearest"], "default": "lanczos"}
+    ],
+    "buttons": [
+      {"id": "resize", "label": "Resize image"},
+      {"id": "newLayer", "label": "Add a layer"},
+      {"id": "invert", "label": "Invert colors"}
+    ]
+  }
+}

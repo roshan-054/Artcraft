@@ -15,6 +15,8 @@
 # Product and technology names (PhotoCraft, ArtCraft, OpenType, CMYK, Lab ...) stay in Latin
 # letters; the trailing "…" of dialog commands is kept. Plural rule: a count is followed by the
 # singular noun in Hungarian, so every @plural entry has a single form.
+	Automatic update checks	Frissítések automatikus keresése
+	Last update check unix secs	Utolsó frissítésellenőrzés Unix-másodpercben
 
 # Plural messages and command id overrides
 # Custom paper dimensions in Print Settings.
@@ -4118,6 +4120,14 @@ cameraRaw	Yellow	Sárga
 # Free Transform: a new layer while the box is open (#5859)
 	Free Transform is still being applied; try again when it has finished.	A szabad alakítás alkalmazása még folyamatban van; próbáld újra, ha befejeződött.
 	The transform couldn't be applied.	Az átalakítás nem alkalmazható.
+
+# Native-panel extensions
+	Manage Extensions…	Bővítmények kezelése…
+
+# Plugins menu
+	Plugins	Bővítmények
+	Manage Plugins…	Bővítmények kezelése…
+
 # Preferences › Performance › GPU Memory; the status bar and slow-redraw notice
 	Its layers need {needed} of GPU memory; the budget leaves them {budget}.	A rétegeknek {needed} GPU-memória kell; a keret {budget} hagy nekik.
 	Set GPU Memory in Preferences › Performance to what your graphics card can hold, at most 3/8 of its memory. Automatic follows Memory Usage, within a quarter of this computer's memory and 3/8 of the card's, and doesn't count the document against a card whose memory is known. The status bar shows GPU Memory Full while they don't fit.	A Beállítások › Teljesítmény alatt állítsd a GPU-memóriát arra, amennyit a videokártyád elbír, legfeljebb a memóriája 3/8-ára. Az Automatikus a memóriahasználatot követi, a számítógép memóriájának negyedén és a kártya 3/8-án belül, és ismert memóriájú kártyánál nem számítja bele a dokumentumot. Amíg nem férnek el, az állapotsor a GPU-memória megtelt üzenetet mutatja.
