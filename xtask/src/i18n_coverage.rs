@@ -43,8 +43,43 @@ pub fn run(root: &Path) -> Result<(), String> {
     if english_keys.is_empty() {
         return Err("no source-derived English UI translation keys were found".into());
     }
+    let doc_path = root.join("docs/localization.md");
+    let doc = fs::read_to_string(&doc_path).map_err(|e| format!("{}: {e}", doc_path.display()))?;
+    check_documented_languages(&languages, &doc)?;
     print!("{}", format_report(&languages, &english_keys, &translations));
     Ok(())
+}
+
+/// The "Supported languages" table in `docs/localization.md` lists every registered language and
+/// nothing else. A language shipped without its row (Turkish, #1373) is otherwise invisible there.
+fn check_documented_languages(languages: &[Language], doc: &str) -> Result<(), String> {
+    let table = doc
+        .split("## Supported languages")
+        .nth(1)
+        .ok_or_else(|| "docs/localization.md has no `## Supported languages` section".to_string())?
+        .split("\n#")
+        .next()
+        .unwrap_or_default();
+    let mut documented = BTreeSet::new();
+    for line in table.lines().filter(|line| line.starts_with('|')) {
+        if let Some(code) = line.split('|').nth(2).and_then(|cell| cell.trim().strip_prefix('`')).and_then(|cell| cell.strip_suffix('`')) {
+            documented.insert(code.to_string());
+        }
+    }
+    let registered: BTreeSet<String> = languages.iter().map(|language| language.code.clone()).collect();
+    let missing: Vec<&str> = registered.difference(&documented).map(String::as_str).collect();
+    let extra: Vec<&str> = documented.difference(&registered).map(String::as_str).collect();
+    if missing.is_empty() && extra.is_empty() {
+        return Ok(());
+    }
+    let mut message = String::from("docs/localization.md's Supported languages table is out of date:");
+    if !missing.is_empty() {
+        message.push_str(&format!("\n  registered but not listed: {}", missing.join(", ")));
+    }
+    if !extra.is_empty() {
+        message.push_str(&format!("\n  listed but not registered: {}", extra.join(", ")));
+    }
+    Err(message)
 }
 
 fn source_keys(root: &Path) -> Result<BTreeSet<Key>, String> {
@@ -464,6 +499,54 @@ fn unescape_tsv(source: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const LANGUAGE_DOC: &str = "# Localisation
+
+## Supported languages
+
+| Language | Preference code | Integer plural forms |
+|---|---|---|
+| English | `en` | one / other |
+| Türkçe | `tr` | one form |
+
+## Catalogs
+| Example | `not-a-language` | ignored outside the section |
+";
+
+    fn documentation_languages() -> [Language; 2] {
+        [Language { code: "en".into(), catalog: None }, Language { code: "tr".into(), catalog: Some("tr.tsv".into()) }]
+    }
+
+    #[test]
+    fn documented_languages_match_the_registry() {
+        assert_eq!(check_documented_languages(&documentation_languages(), LANGUAGE_DOC), Ok(()));
+    }
+
+    #[test]
+    fn documented_languages_reject_a_missing_registered_code() {
+        let doc = LANGUAGE_DOC.replace("| Türkçe | `tr` | one form |\n", "");
+        assert_eq!(
+            check_documented_languages(&documentation_languages(), &doc),
+            Err("docs/localization.md's Supported languages table is out of date:\n  registered but not listed: tr".into())
+        );
+    }
+
+    #[test]
+    fn documented_languages_reject_an_unregistered_code() {
+        let doc = LANGUAGE_DOC.replace("## Catalogs", "| Klingon | `tlh` | one / other |\n\n## Catalogs");
+        assert_eq!(
+            check_documented_languages(&documentation_languages(), &doc),
+            Err("docs/localization.md's Supported languages table is out of date:\n  listed but not registered: tlh".into())
+        );
+    }
+
+    #[test]
+    fn documented_languages_require_the_supported_languages_section() {
+        assert_eq!(
+            check_documented_languages(&documentation_languages(), "# Localisation\n\n## Catalogs\n"),
+            Err("docs/localization.md has no `## Supported languages` section".into())
+        );
+    }
 
     fn known_keys(values: &[&str]) -> BTreeSet<Key> {
         values.iter().map(|value| Key { context: String::new(), source: (*value).to_string() }).collect()
