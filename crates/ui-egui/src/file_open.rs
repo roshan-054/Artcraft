@@ -89,6 +89,12 @@ impl PhotocraftApp {
             && !st.source_read_only
         {
             st.path = Some(path.to_string());
+            // Links of a project that was moved or renamed point at its files again (#6608).
+            // Not an edit: the document stays unmodified.
+            let found = photocraft_engine::link_find::moved_links(&st.doc, path);
+            if !found.is_empty() {
+                photocraft_engine::link_find::relink(std::sync::Arc::make_mut(&mut st.doc), &found);
+            }
             let doc = st.doc.id;
             self.remember_stamp(doc, path);
         }

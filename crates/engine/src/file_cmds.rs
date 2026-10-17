@@ -490,6 +490,11 @@ pub fn open_bytes_as(s: &mut Session, name: &str, bytes: &[u8], as_ext: Option<&
             path
         }
     };
+    // Links of a project that was moved or renamed point at its files again (#6608).
+    if let Some(p) = &path {
+        let found = crate::link_find::moved_links(&doc, p);
+        crate::link_find::relink(&mut doc, &found);
+    }
     // Color Settings policies (preserve / convert / discard the embedded profile).
     let (i, color) = s.open_document(doc, path.filter(|_| !r.source_read_only));
     if let Some(st) = s.active_mut() {

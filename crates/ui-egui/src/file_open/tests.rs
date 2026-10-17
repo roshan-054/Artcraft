@@ -928,3 +928,32 @@ fn opening_type_in_a_missing_font_warns() {
     // The importer's own warning for the same font isn't doubled.
     assert_eq!(app.open_bytes("warned.psd", b"x").unwrap(), vec![warning]);
 }
+
+/// #6608: a document opened from a moved project folder finds its linked files below its own
+/// folder, and isn't marked modified for it.
+#[test]
+fn opening_a_moved_project_relinks_its_smart_objects() {
+    use photocraft_doc::{Layer, LayerContent, SmartObject, SmartSource};
+    let root = std::env::temp_dir().join(format!("pc-ui-link-open-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(root.join("art")).unwrap();
+    std::fs::write(root.join("art").join("logo.png"), b"x").unwrap();
+    let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Services::default());
+    app.run("file.new", json!({"width": 4, "height": 4})).unwrap();
+    let st = app.session.active_mut().unwrap();
+    let doc = std::sync::Arc::make_mut(&mut st.doc);
+    let id = doc.insert_above(
+        None,
+        Layer::new(
+            "logo",
+            LayerContent::Smart(SmartObject::new(SmartSource::Linked { path: r"C:\work\old\art\logo.png".into() }, photocraft_geom::Affine::IDENTITY, None)),
+        ),
+    );
+    st.saved_revision = st.revision;
+    app.opened_from(root.join("design.psd").to_str().unwrap());
+    let st = app.session.active().unwrap();
+    let found = SmartSource::Linked { path: root.join("art").join("logo.png").to_str().unwrap().into() };
+    assert!(matches!(&st.doc.layer(id).unwrap().content, LayerContent::Smart(sm) if sm.source == found));
+    assert!(!st.is_dirty());
+    let _ = std::fs::remove_dir_all(&root);
+}
