@@ -1396,6 +1396,9 @@ fn build() -> Vec<CommandSpec> {
         });
     }
     v.extend(crate::layer_style::specs());
+    v.extend(crate::image_cutout_cmds::specs());
+    v.extend(crate::publication_cmds::specs());
+    v.extend(crate::figure_cmds::specs());
     v.extend(crate::layer_list_cmds::specs());
     v.extend(crate::filters::specs());
     v.extend(crate::filters_ext::specs());

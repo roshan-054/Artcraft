@@ -42,6 +42,18 @@ fn doc_stem(app: &PhotocraftApp) -> String {
     app.session.active().map(|d| d.doc.name.rsplit_once('.').map_or(d.doc.name.clone(), |(a, _)| a.to_string())).unwrap_or_else(|| tl!("Untitled").into())
 }
 
+/// `fields` with the values the command remembered from its last run (same types only).
+fn with_remembered(app: &PhotocraftApp, command: &str, mut fields: Value) -> Value {
+    if let (Some(Value::Object(saved)), Some(f)) = (app.session.prefs().dialogs.get(command), fields.as_object_mut()) {
+        for (k, v) in saved {
+            if f.get(k).is_some_and(|cur| std::mem::discriminant(cur) == std::mem::discriminant(v)) {
+                f.insert(k.clone(), v.clone());
+            }
+        }
+    }
+    fields
+}
+
 /// A generic form dialog for `command` (rendered by `view_cmds::form_body`).
 fn form(app: &mut PhotocraftApp, command: &str, label: &str, fields: Value, choices: Value) -> Value {
     let mut f = Map::new();
@@ -79,6 +91,99 @@ pub fn invoke(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, params: &V
         "file.printOneCopy" if app.session.file_menu.last_print.is_none() => {
             app.session.active()?;
             json!({"dialog": open_print(app)})
+        }
+        "figure.fromCollage" => {
+            app.session.active()?;
+            let r = form(
+                app,
+                id,
+                tl!("Prepare Collage for Publication"),
+                with_remembered(
+                    app,
+                    id,
+                    json!({"rows": 0, "columns": 0, "width": "double", "widthMm": 175.0, "dpi": 300, "gutterMm": 1.0, "gutterColor": "#ffffff", "labels": "ABC", "labelBold": true, "labelPosition": "topLeft", "labelSizePt": 12.0, "labelColor": "#ffffff", "labelOutline": true}),
+                ),
+                json!({"width": ["single", "oneAndHalf", "double", "custom"], "labels": ["ABC", "abc", "(A)", "(a)", "A)", "a)", "none"], "labelPosition": ["topLeft", "topRight", "bottomLeft", "bottomRight"]}),
+            );
+            if let Some(f) = r.get("dialog").and_then(Value::as_u64).and_then(|d| app.ui.dialogs.iter_mut().find(|x| x.id == d)) {
+                f.fields.insert(
+                    "__labels".into(),
+                    json!({
+                        "rows": "Rows (0 = detect)", "columns": "Columns (0 = detect)", "labelBold": "Bold labels",
+                    "ABC": "A, B, C (capital)", "abc": "a, b, c (small)", "(A)": "(A), (B), (C)", "(a)": "(a), (b), (c)",
+                    "A)": "A), B), C)", "a)": "a), b), c)", "width": "Figure width", "single": "Single column (85 mm)",
+                        "oneAndHalf": "1.5 column (120 mm)", "double": "Double column (175 mm)", "custom": "Custom (mm below)",
+                        "widthMm": "Custom width (mm)", "dpi": "Resolution (dpi)", "gutterMm": "Separator width (mm)",
+                        "gutterColor": "Separator color (#rrggbb)", "labels": "Panel labels", "none": "No labels", "labelPosition": "Label corner",
+                        "topLeft": "Top left", "topRight": "Top right", "bottomLeft": "Bottom left", "bottomRight": "Bottom right",
+                        "labelSizePt": "Label size (pt)", "labelColor": "Label color (#rrggbb)", "labelOutline": "Outline labels for contrast",
+                    }),
+                );
+            }
+            r
+        }
+        "figure.make" => {
+            let folder = app
+                .session
+                .active()
+                .and_then(|st| st.path.as_deref())
+                .and_then(|p| std::path::Path::new(p).parent())
+                .map_or(dir.clone(), |d| d.to_string_lossy().into_owned());
+            let r = form(
+                app,
+                id,
+                tl!("Make Figure"),
+                with_remembered(
+                    app,
+                    id,
+                    json!({"files": folder, "layout": "rows", "columns": 2, "width": "double", "widthMm": 175.0, "dpi": 300, "gutterMm": 1.0, "gutterColor": "#ffffff", "labels": "abc", "labelBold": true, "labelPosition": "topLeft", "labelSizePt": 12.0, "labelColor": "#ffffff", "labelOutline": true}),
+                ),
+                json!({"layout": ["rows", "grid"], "width": ["single", "oneAndHalf", "double", "custom"], "labels": ["abc", "ABC", "(a)", "(A)", "a)", "A)", "none"], "labelPosition": ["topLeft", "topRight", "bottomLeft", "bottomRight"]}),
+            );
+            if let Some(f) = r.get("dialog").and_then(Value::as_u64).and_then(|d| app.ui.dialogs.iter_mut().find(|x| x.id == d)) {
+                f.fields.insert(
+                    "__labels".into(),
+                    json!({
+                        "files": "Folder of images (placed in name order)", "labelBold": "Bold labels",
+                    "ABC": "A, B, C (capital)", "abc": "a, b, c (small)", "(A)": "(A), (B), (C)", "(a)": "(a), (b), (c)",
+                    "A)": "A), B), C)", "a)": "a), b), c)", "layout": "Layout", "rows": "Rows: same height, no cropping",
+                        "grid": "Grid: equal cells", "columns": "Columns", "width": "Figure width", "single": "Single column (85 mm)",
+                        "oneAndHalf": "1.5 column (120 mm)", "double": "Double column (175 mm)", "custom": "Custom (mm below)",
+                        "widthMm": "Custom width (mm)", "dpi": "Resolution (dpi)", "gutterMm": "Gutter between panels (mm)",
+                        "gutterColor": "Gutter color (#rrggbb)", "labels": "Panel labels", "none": "No labels", "labelPosition": "Label corner",
+                        "topLeft": "Top left", "topRight": "Top right", "bottomLeft": "Bottom left", "bottomRight": "Bottom right",
+                        "labelSizePt": "Label size (pt)", "labelColor": "Label color (#rrggbb)", "labelOutline": "Outline labels for contrast",
+                    }),
+                );
+            }
+            r
+        }
+        "file.export.publication" => {
+            let st = app.session.active()?;
+            let folder = st.path.as_deref().and_then(|p| std::path::Path::new(p).parent()).map_or(dir, |d| d.to_string_lossy().into_owned());
+            let r = form(
+                app,
+                id,
+                tl!("Export for Publication"),
+                with_remembered(
+                    app,
+                    id,
+                    json!({"tiff": true, "png": true, "dpi": 300, "width": "keep", "widthMm": 85.0, "folder": folder, "name": format!("{stem}_300dpi")}),
+                ),
+                json!({"width": ["keep", "single", "oneAndHalf", "double", "custom"]}),
+            );
+            if let Some(f) = r.get("dialog").and_then(Value::as_u64).and_then(|d| app.ui.dialogs.iter_mut().find(|x| x.id == d)) {
+                f.fields.insert(
+                    "__labels".into(),
+                    json!({
+                        "tiff": "TIFF (LZW, lossless)", "png": "PNG (lossless)", "dpi": "Resolution (dpi)", "width": "Print width",
+                        "keep": "Keep pixel size", "single": "Single column (85 mm)", "oneAndHalf": "1.5 column (120 mm)",
+                        "double": "Double column (175 mm)", "custom": "Custom (mm below)", "widthMm": "Custom width (mm)",
+                        "folder": "Folder", "name": "File name",
+                    }),
+                );
+            }
+            r
         }
         "file.export.exportPreferences" => return crate::prefs_ui::invoke(app, ctx, "edit.preferences.export", &json!({})),
         "file.automate.contactSheetII" => form(
@@ -1693,5 +1798,27 @@ mod web_clock_tests {
         assert_eq!(advance_preview(usize::MAX, 0, f32::NAN, 0.0, 1.0), (0, 1.0));
         assert_eq!(advance_preview(usize::MAX - 2, usize::MAX, 2.0, 0.0, 1.0), (0, 1.0));
         assert_eq!(advance_preview(2, 3, 2.0, 10.0, 9.0), (2, 9.0));
+    }
+}
+
+#[cfg(test)]
+mod publication_dialog_tests {
+    use super::*;
+
+    /// The collage, figure and export dialogs open with the choices of their last run.
+    #[test]
+    fn publication_dialogs_open_with_remembered_choices() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
+        app.run("file.new", json!({"width": 500, "height": 200, "background": "black", "resolution": 300})).unwrap();
+        app.run("figure.fromCollage", json!({"rows": 1, "columns": 5, "labels": "(a)", "gutterColor": "#000000"})).unwrap();
+        let ctx = egui::Context::default();
+        let r = invoke(&mut app, &ctx, "figure.fromCollage", &json!({})).unwrap().unwrap();
+        let id = r["dialog"].as_u64().unwrap();
+        let f = &app.ui.dialogs.iter().find(|d| d.id == id).unwrap().fields;
+        assert_eq!((f["labels"].as_str(), f["gutterColor"].as_str(), f["columns"].as_i64()), (Some("(a)"), Some("#000000"), Some(5)));
+        assert!(f.contains_key("__labels"));
+        for menu in ["figure.make", "file.export.publication"] {
+            assert!(invoke(&mut app, &ctx, menu, &json!({})).is_some_and(|r| r.is_ok()), "{menu} opens a dialog");
+        }
     }
 }

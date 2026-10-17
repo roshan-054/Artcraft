@@ -43,7 +43,7 @@ impl PenPath {
 }
 
 pub fn is_shape_tool(t: Tool) -> bool {
-    matches!(t, Tool::Rectangle | Tool::EllipseShape | Tool::Triangle | Tool::Polygon | Tool::Line | Tool::CustomShape)
+    matches!(t, Tool::Rectangle | Tool::EllipseShape | Tool::Triangle | Tool::Polygon | Tool::Line | Tool::Arrow | Tool::Marker | Tool::CustomShape)
 }
 
 fn rgb32(c: [f32; 4]) -> Color32 {
@@ -107,6 +107,13 @@ fn shape_geometry(o: &ToolOptions, tool: Tool, start: [f64; 2], end: [f64; 2], m
 /// The box `[x0, y0, x1, y1]` a Shape-tool drag draws (a line's: its ends'), which snaps while
 /// Space repositions it (`snap_ui`). None when too small to draw.
 pub fn shape_bounds(o: &ToolOptions, tool: Tool, start: [f64; 2], end: [f64; 2], mods: egui::Modifiers) -> Option<[f64; 4]> {
+    if tool == Tool::Marker {
+        return Some([start[0], start[1], start[0], start[1]]);
+    }
+    if tool == Tool::Arrow {
+        let g = crate::arrow_ui::geometry(start, end, mods)?;
+        return Some([g.p0[0].min(g.p1[0]), g.p0[1].min(g.p1[1]), g.p0[0].max(g.p1[0]), g.p0[1].max(g.p1[1])]);
+    }
     let g = shape_geometry(o, tool, start, end, mods)?;
     if tool == Tool::Line {
         let a: [f64; 2] = serde_json::from_value(g["from"].clone()).ok()?;
@@ -119,6 +126,16 @@ pub fn shape_bounds(o: &ToolOptions, tool: Tool, start: [f64; 2], end: [f64; 2],
 
 /// Finish a Shape-tool drag: ⇧ constrains proportions, ⌥ draws from the centre.
 pub fn finish_shape(app: &mut PhotocraftApp, tool: Tool, start: [f64; 2], end: [f64; 2], mods: egui::Modifiers) {
+    if tool == Tool::Marker {
+        crate::marker_ui::place(app, start);
+        return;
+    }
+    if tool == Tool::Arrow {
+        if let Some(g) = crate::arrow_ui::geometry(start, end, mods) {
+            crate::arrow_ui::create(app, &g);
+        }
+        return;
+    }
     let Some(mut p) = shape_geometry(&app.ui.tool_options, tool, start, end, mods) else { return };
     if tool == Tool::CustomShape {
         // ⇧ keeps the shape's proportions (the rect is already squared).
@@ -148,6 +165,12 @@ pub fn create_shape(app: &mut PhotocraftApp, mut geometry: Value) -> Result<Valu
 
 /// The preview and command both use the full float tool colours, including transparent paint.
 fn shape_preview(app: &PhotocraftApp, tool: Tool, start: [f64; 2], end: [f64; 2], mods: egui::Modifiers) -> Option<photocraft_doc::ShapeLayer> {
+    if tool == Tool::Marker {
+        return crate::marker_ui::preview(app, start);
+    }
+    if tool == Tool::Arrow {
+        return crate::arrow_ui::preview(app, &crate::arrow_ui::geometry(start, end, mods)?);
+    }
     let o = &app.ui.tool_options;
     let geometry = shape_geometry(o, tool, start, end, mods)?;
     let path = if tool == Tool::CustomShape {
@@ -1100,6 +1123,12 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui, tool: Tool) -> bo
     {
         return false;
     }
+    if tool == Tool::Arrow {
+        return crate::arrow_ui::options_bar(app, ui);
+    }
+    if tool == Tool::Marker {
+        return crate::marker_ui::options_bar(app, ui, tool);
+    }
     let t = Tokens::get(ui.ctx());
     let lbl = |ui: &mut egui::Ui, s: &str| {
         ui.label(egui::RichText::new(s).color(t.text_dim).size(12.0));
@@ -1308,7 +1337,7 @@ fn solid_paint(c: [f32; 4]) -> photocraft_doc::Fill {
     photocraft_doc::Fill::Solid(photocraft_doc::Color::rgba(c[0], c[1], c[2], c[3]))
 }
 
-fn color_of(f: &photocraft_doc::Fill) -> Option<[f32; 4]> {
+pub(crate) fn color_of(f: &photocraft_doc::Fill) -> Option<[f32; 4]> {
     match f {
         photocraft_doc::Fill::Solid(c) => {
             let [r, g, b] = c.to_rgb();
@@ -1319,7 +1348,7 @@ fn color_of(f: &photocraft_doc::Fill) -> Option<[f32; 4]> {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-enum PaintChange {
+pub(crate) enum PaintChange {
     Color([f32; 4]),
     None,
 }
@@ -1360,7 +1389,7 @@ fn picker_rgba(hsva: egui::ecolor::Hsva) -> [f32; 4] {
 
 /// The shared compact picker keeps the float RGB paint and its alpha. Color32 is only display
 /// data: opening the picker must never quantize an existing high-depth colour or enable paint.
-fn swatch(ui: &mut egui::Ui, fill: Option<&photocraft_doc::Fill>, fallback: [f32; 4], tip: &str) -> Option<PaintChange> {
+pub(crate) fn swatch(ui: &mut egui::Ui, fill: Option<&photocraft_doc::Fill>, fallback: [f32; 4], tip: &str) -> Option<PaintChange> {
     let t = Tokens::get(ui.ctx());
     let (r, resp) = ui.allocate_exact_size(vec2(30.0, 22.0), Sense::click());
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::ColorButton, ui.is_enabled(), tip));

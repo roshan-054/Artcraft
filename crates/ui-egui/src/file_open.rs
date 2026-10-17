@@ -128,7 +128,8 @@ impl PhotocraftApp {
     /// open in name order ([`natural_cmp`]: `File_2` before `File_10`), and their tabs keep that
     /// order however long each takes to open in the background (#3248). Returns how many opened.
     pub fn open_paths(&mut self, paths: &[String]) -> usize {
-        let mut paths: Vec<String> = paths.iter().map(|p| absolute(p)).collect();
+        // A screenshot library PNG opens as its editable copy (`screenshot::editable`).
+        let mut paths: Vec<String> = paths.iter().map(|p| crate::screenshot::editable(self, &absolute(p))).collect();
         paths.sort_by(|a, b| natural_cmp(a, b));
         let batch = crate::jobs_ui::begin_batch(self);
         let mut opened = 0;

@@ -3868,6 +3868,7 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
         crate::gradient_ui::draw_overlay(app, &painter, &xf);
         crate::slice_ui::draw_overlay(app, &painter, &xf);
         crate::frame_tool::draw_overlay(app, &painter, &xf);
+        crate::arrow_ui::draw_overlay(app, &painter, &xf);
         crate::artboard_tool::draw_overlay(app, &painter, &xf);
         // Tool cursors (Photoshop-style).
         let guide_hover = response.hover_pos().and_then(|p| {
@@ -3894,6 +3895,8 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
             ui.ctx().set_cursor_icon(c);
         } else if let Some(c) = response.hover_pos().and_then(|p| crate::cam_transform::cursor(app, &ctx, &xf, p)) {
             ui.ctx().set_cursor_icon(c);
+        } else if response.hover_pos().is_some_and(|p| crate::arrow_ui::hovers(app, xf.to_doc(p))) {
+            ui.ctx().set_cursor_icon(if app.ui.arrow_drag.is_some() { egui::CursorIcon::Grabbing } else { egui::CursorIcon::Grab });
         } else if let Some(p) = response.hover_pos().filter(|p| crate::corner_radius::hovers(app, xf.to_doc(*p))) {
             // Over a live rectangle's corner widget (or dragging one): the arrow with a rounded
             // corner badge, as Photoshop's corner radius cursor.
@@ -4925,6 +4928,7 @@ fn draw_drag_preview(app: &mut PhotocraftApp, painter: &egui::Painter, xf: &View
             trail.draw(painter, doc_rect, xf.flip, col);
         }
         t if crate::vector_ui::is_shape_tool(t) => crate::vector_ui::draw_shape_preview(app, painter, xf, t, d.start, last, d.live),
+        Tool::CutOut => crate::cutout_ui::draw_preview(app, painter, xf, d.start, last),
         Tool::SingleRowMarquee | Tool::SingleColumnMarquee => {
             // Mapped corner by corner like the other marquees, so a rotated view shows the line
             // where the release commits it (#2512).
@@ -5195,6 +5199,12 @@ pub fn tool_event(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifiers)
     let ev = crate::move_mods::filter_event(app, ev, mods);
     // A live rectangle's corner radius widgets (Path Selection, Rectangle tool).
     if crate::corner_radius::pointer(app, ev, mods) {
+        return;
+    }
+    // Cut Out finds a collage's panel edges at the press, to snap the band to (never consumes).
+    crate::cutout_ui::pointer(app, ev);
+    // The active arrow's tail, bend and tip handles (Arrow tool).
+    if crate::arrow_ui::pointer(app, ev, mods) {
         return;
     }
     // Direct Selection, and the Pen's ⌘ (Direct Selection) and ⌥ (Convert Point) modes (#790).
@@ -5819,6 +5829,7 @@ pub(crate) fn finish_gesture(app: &mut PhotocraftApp, d: Drag) {
             && crate::shape_dialog::is_click(d.start, &d.points, app.point_zoom())
             && crate::shape_dialog::open(app, t, d.start).is_some() => {}
         t if crate::vector_ui::is_shape_tool(t) => crate::vector_ui::finish_shape(app, t, d.start, [end[0], end[1]], d.live),
+        Tool::CutOut => crate::cutout_ui::finish(app, d.start, [end[0], end[1]]),
         Tool::PathSelection => crate::vector_ui::path_selection_finish(app, d.start, [end[0], end[1]]),
         Tool::Type | Tool::VerticalType | Tool::HorizontalTypeMask | Tool::VerticalTypeMask => crate::type_tool::pointer_up(app, d.start, [end[0], end[1]]),
         Tool::Brush | Tool::Pencil | Tool::Eraser => commit_brush_stroke(app, &d),

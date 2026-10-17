@@ -22,6 +22,7 @@ pub mod adjust_ui;
 mod alt_grab;
 pub mod analysis_ui;
 pub mod anchor_tools;
+pub mod arrow_ui;
 pub mod artboard_tool;
 pub mod artboard_ui;
 pub(crate) mod background_redraw;
@@ -68,6 +69,7 @@ pub mod crop_shield;
 pub mod crop_size;
 pub mod crop_straighten;
 pub mod crop_ui;
+pub mod cutout_ui;
 pub mod delete_layer_prompt;
 pub mod dialog_alt_reset;
 pub mod dialog_blend_ui;
@@ -126,6 +128,7 @@ mod layout_keys;
 pub mod links;
 pub mod liquify_ui;
 pub mod magnetic_lasso_ui;
+pub mod marker_ui;
 mod mask_props_ui;
 pub mod mask_thumbs_ui;
 pub mod mask_trash_prompt;
@@ -178,6 +181,7 @@ mod rgb_histogram;
 pub mod rotate_view;
 pub mod rulers;
 pub mod screen_picker;
+pub mod screenshot;
 pub mod scrollbars;
 mod scrub_wrap;
 pub mod select_mask_view;
@@ -714,6 +718,8 @@ pub struct PhotocraftApp {
     pub(crate) transform_preview: Option<transform_tool::TransformPreview>,
     /// Move-tool ⇧/⌥ drag state (move_mods).
     pub(crate) move_mods: move_mods::MoveDrag,
+    /// A screenshot being taken (File › New Screenshot), finished by `screenshot::tick`.
+    pub(crate) screenshot: Option<screenshot::Pending>,
     /// Cached document for a modal text Style Options color preview.
     pub(crate) text_style_preview: Option<type_panels_ui::color_picker::Preview>,
     /// The run of arrow-key nudges that share one History state (nudge_bundle).
@@ -927,6 +933,7 @@ impl PhotocraftApp {
             clip_read_for_paste: false,
             transform_preview: None,
             move_mods: Default::default(),
+            screenshot: None,
             nudge_bundle: Default::default(),
             style_preview: None,
             text_style_preview: None,
@@ -1660,6 +1667,10 @@ impl PhotocraftApp {
                     st.saved_revision = revision;
                     app.remember_stamp(doc, path);
                 }
+                // A screenshot library document keeps its PNG in step with the editable file.
+                if hooks && arm {
+                    crate::screenshot::after_save(app, path);
+                }
                 // "Save Document" script events and File › Generate › Image Assets.
                 if hooks
                     && let Some(i) = app.session.active_index()
@@ -1898,6 +1909,7 @@ impl eframe::App for PhotocraftApp {
         discard_ui::guard_window_close(self, ctx);
         // Background jobs: apply finished ones, keep frames coming, Esc cancels (before the
         // shortcuts see Esc).
+        screenshot::tick(self, ctx);
         if !screen_picker::tick(self, ctx) {
             jobs_ui::tick(self, ctx);
             #[cfg(not(target_arch = "wasm32"))]
