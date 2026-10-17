@@ -838,6 +838,76 @@ fn quick_export_selected_layers_writes_separate_pngs_with_one_prompt() {
     assert!(!app.ui.status_error, "{}", app.ui.status);
 }
 
+/// #6599: Quick Export as PNG with Location = Same Folder asks before replacing the document's
+/// own file (a document opened from photo.png), and keeps writing beside a PSD without a prompt.
+#[test]
+fn same_folder_quick_export_asks_before_replacing_the_documents_own_file() {
+    let dir = std::env::temp_dir().join(format!("photocraft-quick-own-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let own = dir.join("photo.png").to_string_lossy().into_owned();
+    std::fs::write(&own, b"original").unwrap();
+    let (mut app, open, _) = app();
+    app.run("prefs.set", json!({"path": "export.quickExportLocation", "value": "sameFolder"})).unwrap();
+    app.session.active_mut().unwrap().path = Some(own.clone());
+    let ctx = egui::Context::default();
+    menus::invoke(&mut app, &ctx, "file.export.quickExportAsPng", Value::Null).unwrap();
+    app.poll_file_dialog(&ctx, None);
+    assert_eq!(open.borrow().len(), 1, "the save dialog asks");
+    assert_eq!(std::fs::read(&own).unwrap(), b"original", "nothing written before the answer");
+    answer(&open, Some(FileDialogAnswer::SaveTo(own.clone())));
+    app.poll_file_dialog(&ctx, None);
+    assert!(std::fs::read(&own).unwrap().starts_with(b"\x89PNG\r\n\x1a\n"), "replaced once confirmed: {}", app.ui.status);
+
+    // Beside a PSD, Same Folder still writes without a prompt.
+    app.session.active_mut().unwrap().path = Some(dir.join("photo.psd").to_string_lossy().into_owned());
+    std::fs::write(&own, b"earlier export").unwrap();
+    menus::invoke(&mut app, &ctx, "file.export.quickExportAsPng", Value::Null).unwrap();
+    app.poll_file_dialog(&ctx, None);
+    assert!(open.borrow().is_empty(), "no dialog");
+    assert!(std::fs::read(&own).unwrap().starts_with(b"\x89PNG\r\n\x1a\n"));
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// #6597: once Save As or Save a Copy writes over the file another open document is bound to,
+/// that document no longer has the file and reads as unsaved (so closing it asks, and its Save
+/// asks for a name), and a notice says so. Documents bound to other files are left alone.
+#[test]
+fn saving_over_the_file_of_another_open_document_detaches_it() {
+    let dir = std::env::temp_dir().join(format!("photocraft-save-over-tab-{}", std::process::id()));
+    let (a, d) = (dir.join("a.psd").to_string_lossy().into_owned(), dir.join("d.psd").to_string_lossy().into_owned());
+    let (mut app, open, written) = app();
+    let saved_as = |app: &mut PhotocraftApp, path: &str| {
+        let st = app.session.active_mut().unwrap();
+        st.path = Some(path.to_string());
+        st.saved_revision = st.revision;
+    };
+    // A lives in a.psd and D in d.psd, both saved.
+    saved_as(&mut app, &a);
+    app.run("file.new", json!({"width": 4, "height": 4})).unwrap();
+    saved_as(&mut app, &d);
+    // B, in another tab, is saved as a.psd.
+    app.run("file.new", json!({"width": 4, "height": 4})).unwrap();
+    app.save_as(Some(a.clone())).unwrap();
+    let docs = app.session.documents();
+    assert_eq!((docs[0].path.as_deref(), docs[0].is_dirty()), (None, true), "A lost a.psd and is unsaved");
+    assert_eq!((docs[1].path.as_deref(), docs[1].is_dirty()), (Some(d.as_str()), false), "D is untouched");
+    assert_eq!(docs[2].path.as_deref(), Some(a.as_str()), "B lives in a.psd");
+    let notice = app.ui.notices.last().expect("a notice");
+    assert!(notice.title.contains("a.psd was saved over") && notice.lines.len() == 1, "{} {:?}", notice.title, notice.lines);
+    // C's Save a Copy onto a.psd detaches B the same way, and C doesn't take the file.
+    app.run("file.new", json!({"width": 4, "height": 4})).unwrap();
+    let ctx = egui::Context::default();
+    menus::invoke(&mut app, &ctx, "file.saveACopy", json!({})).unwrap();
+    app.poll_file_dialog(&ctx, None);
+    answer(&open, Some(FileDialogAnswer::SaveTo(a.clone())));
+    app.poll_file_dialog(&ctx, None);
+    let docs = app.session.documents();
+    assert_eq!((docs[2].path.as_deref(), docs[2].is_dirty()), (None, true), "B lost a.psd and is unsaved");
+    assert_eq!(docs[3].path, None, "a copy doesn't bind C to a.psd");
+    assert_eq!(*written.borrow(), [a.clone(), a]);
+}
+
 #[test]
 fn cancelling_multi_layer_quick_export_writes_nothing() {
     let (mut app, open, written) = app();
