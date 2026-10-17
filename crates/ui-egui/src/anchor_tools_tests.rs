@@ -279,6 +279,82 @@ fn the_pen_draws_on_the_path_being_drawn_where_auto_add_delete_does_not_apply() 
     assert!(app.ui.pen.is_none(), "the first anchor closes the path");
 }
 
+fn open_paths(app: &mut PhotocraftApp) {
+    let path = json!({"subpaths": [
+        {"closed": false, "knots": [[40, 40], [120, 40], [120, 120]]},
+        {"closed": false, "knots": [[20, 160], [60, 180], [100, 160]]}
+    ]});
+    app.run("path.set", json!({"name": "work", "path": path})).unwrap();
+}
+
+fn anchors(path: &Path, sub: usize) -> Vec<[f64; 2]> {
+    path.subpaths[sub].knots.iter().map(|k| [k.anchor.x, k.anchor.y]).collect()
+}
+
+/// Continuing an open end extends that subpath from either end. The other subpath stays.
+#[test]
+fn the_pen_continues_either_end_of_an_open_subpath() {
+    let mut app = app(Tool::Pen);
+    open_paths(&mut app);
+    let n = steps(&app);
+    click(&mut app, [120.0, 120.0], Modifiers::NONE);
+    click(&mut app, [160.0, 160.0], Modifiers::NONE);
+    crate::vector_ui::pen_commit(&mut app, false);
+    let p = work(&app);
+    assert_eq!(anchors(&p, 0), vec![[40.0, 40.0], [120.0, 40.0], [120.0, 120.0], [160.0, 160.0]]);
+    assert_eq!(anchors(&p, 1).len(), 3, "the other subpath stays");
+    assert!(!p.subpaths[0].closed);
+    assert_eq!(app.session.active().unwrap().history.undo_label(), Some("Pen"));
+    assert!(app.session.undo());
+    assert_eq!(anchors(&work(&app), 0).len(), 3);
+    assert_eq!(steps(&app), n);
+
+    click(&mut app, [40.0, 40.0], Modifiers::NONE);
+    click(&mut app, [0.0, 0.0], Modifiers::NONE);
+    crate::vector_ui::pen_commit(&mut app, false);
+    assert_eq!(anchors(&work(&app), 0), vec![[120.0, 120.0], [120.0, 40.0], [40.0, 40.0], [0.0, 0.0]], "the first end is reversed, then extended");
+    assert_eq!(anchors(&work(&app), 1).len(), 3);
+}
+
+/// Esc or a tool switch with no new point leaves the path and its history alone. A new point
+/// retracts with Backspace and does not undo the document. A new document receives the continuation
+/// on the document that was current.
+#[test]
+fn continuing_cancels_without_a_step_and_follows_the_document() {
+    let mut app = app(Tool::Pen);
+    open_paths(&mut app);
+    let before = work(&app);
+    let n = steps(&app);
+    click(&mut app, [120.0, 120.0], Modifiers::NONE);
+    crate::vector_ui::pen_commit(&mut app, false);
+    assert!(app.ui.pen.is_none());
+    assert_eq!((work(&app), steps(&app)), (before.clone(), n), "Escape with no new point records nothing");
+
+    click(&mut app, [120.0, 120.0], Modifiers::NONE);
+    click(&mut app, [150.0, 150.0], Modifiers::NONE);
+    assert!(crate::vector_ui::pen_undo_last_point(&mut app));
+    assert_eq!(app.ui.pen.as_ref().map(|p| p.knots.len()), Some(3));
+    assert!(!crate::vector_ui::pen_undo_last_point(&mut app), "the placed end stays");
+    assert_eq!(work(&app), before, "retracting a draft point is not a document undo");
+    app.ui.tool = Tool::Move;
+    if app.ui.pen.as_ref().is_some_and(|p| !p.drawn_with(app.ui.tool)) {
+        crate::vector_ui::pen_commit(&mut app, false);
+    }
+    assert!(app.ui.pen.is_none());
+    assert_eq!((work(&app), steps(&app)), (before, n), "leaving the Pen with no new point records nothing");
+
+    app.ui.tool = Tool::Pen;
+    click(&mut app, [120.0, 120.0], Modifiers::NONE);
+    click(&mut app, [150.0, 90.0], Modifiers::NONE);
+    let original = app.session.active().unwrap().doc.id;
+    app.run("file.new", json!({"width": 80, "height": 80})).unwrap();
+    assert!(app.ui.pen.is_none());
+    let docs = app.session.documents();
+    let old = docs.iter().find(|d| d.doc.id == original).unwrap();
+    assert_eq!(old.doc.work_path.as_ref().unwrap().subpaths[0].knots.len(), 4);
+    assert!(docs.iter().any(|d| d.doc.id != original && d.doc.work_path.is_none()));
+}
+
 #[test]
 fn the_pen_cursor_shows_auto_add_delete_on_the_path_being_drawn() {
     use crate::tool_feedback::{Badge, badge};

@@ -759,7 +759,7 @@ fn a_damaged_preset_set_keeps_the_other_sets() {
     let settings = json!({"width": 1600, "height": 900, "resolution": 144});
     s.execute("document.presets.save", json!({"name": "Banner", "settings": settings})).unwrap();
     let saved = s.presets.to_json(&s);
-    for key in ["gradients", "gradient", "styles", "shapes", "pattern_groups", "custom_shapes", "layer_defaults", "swatches"] {
+    for key in ["gradients", "gradient", "styles", "shapes", "pattern_groups", "custom_shapes", "layer_defaults", "swatches", "export_presets"] {
         let mut blob = saved.clone();
         blob[key] = json!("not a preset set");
         let mut next = Session::new();

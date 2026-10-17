@@ -14,6 +14,17 @@ use crate::canvas::ViewXform;
 use crate::state::{Tool, ToolOptions};
 use crate::theme::Tokens;
 
+/// An open path the Pen is continuing: commit replaces this subpath instead of appending one.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PenResume {
+    /// `"work"` or `"layer"`.
+    pub name: String,
+    pub layer: Option<u64>,
+    pub subpath: usize,
+    /// Anchors already on the path. Undo will not drop below this.
+    pub kept: usize,
+}
+
 /// Pen tool path under construction: knots as [anchor, in, out] (document px).
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct PenPath {
@@ -21,6 +32,9 @@ pub struct PenPath {
     /// Indices of cusp knots whose incoming and outgoing handles are not linked.
     #[serde(default)]
     pub unlinked: Vec<usize>,
+    /// Set while the next commit continues an existing open subpath.
+    #[serde(default)]
+    pub resume: Option<PenResume>,
     #[serde(skip)]
     pub dragging: bool,
     /// Re-dragging the final anchor changes its outgoing control only; the incoming curve stays put.
@@ -223,6 +237,11 @@ pub fn closes_path_at(app: &PhotocraftApp, tool: Tool, x: f64, y: f64) -> bool {
 /// lands on the nearest 45° ray from the previous one, at the pointer's projection onto it.
 pub fn pen_down(app: &mut PhotocraftApp, x: f64, y: f64, shift: bool) {
     let tol = 6.0 / app.point_zoom().max(0.01) as f64;
+    // Auto Add/Delete leaves an open end to the Pen (#4144). Continue that subpath instead of
+    // starting a new one. ⇧ still places a point, and the option off does too.
+    if app.ui.pen.as_ref().is_none_or(|p| p.knots.is_empty()) && !shift && app.ui.tool_options.pen_auto_add_delete && continue_open_end(app, x, y) {
+        return;
+    }
     let pen = app.ui.pen.get_or_insert_with(PenPath::default);
     if let Some(first) = pen.knots.first().map(|k| k[0])
         && on_closing_anchor(pen, x, y, tol)
@@ -286,6 +305,9 @@ fn shift_45(origin: [f64; 2], p: [f64; 2], shift: bool) -> [f64; 2] {
 /// knot rather than undoing an unrelated, already committed document operation.
 pub fn pen_undo_last_point(app: &mut PhotocraftApp) -> bool {
     let Some(pen) = app.ui.pen.as_mut() else { return false };
+    if pen.resume.as_ref().is_some_and(|r| pen.knots.len() <= r.kept) {
+        return false;
+    }
     if pen.knots.pop().is_none() {
         return false;
     }
@@ -436,10 +458,116 @@ pub fn pen_commit(app: &mut PhotocraftApp, closed: bool) {
     commit_path(app, &pen, closed);
 }
 
+/// Idle Pen on an open end of the active path: load that subpath so the next points extend it.
+/// Continuing from the first anchor reverses the knots. False when the click is not such an end.
+fn continue_open_end(app: &mut PhotocraftApp, x: f64, y: f64) -> bool {
+    if !x.is_finite() || !y.is_finite() {
+        return false;
+    }
+    let tol = 6.0 / f64::from(app.point_zoom().max(0.01));
+    let found = crate::direct_select::active_paths(app).into_iter().find_map(|(r, path)| {
+        let hit = photocraft_vector::edit::hit(&path, photocraft_geom::Point::new(x, y), tol, &[])?;
+        let photocraft_vector::edit::Hit::Anchor(at) = hit else { return None };
+        photocraft_vector::edit::is_endpoint(&path, at).then_some((r, path, at))
+    });
+    let Some((which, path, [s, k])) = found else { return false };
+    let Some(sp) = path.subpaths.get(s) else { return false };
+    let (name, layer) = match which {
+        crate::direct_select::PathRef::Work => ("work".to_string(), None),
+        crate::direct_select::PathRef::Layer(id) => ("layer".to_string(), Some(id)),
+        crate::direct_select::PathRef::Pen => return false,
+    };
+    let (knots, unlinked) = load_knots(&sp.knots, k == 0 && sp.knots.len() > 1);
+    let kept = knots.len();
+    app.ui.pen = Some(PenPath {
+        knots,
+        unlinked,
+        resume: Some(PenResume { name, layer, subpath: s, kept }),
+        dragging: true,
+        adjusting_last: true,
+        ..Default::default()
+    });
+    true
+}
+
+/// Knots of an existing subpath, as the Pen stores them. Continuing from the first anchor
+/// reverses the subpath so new points extend from that end.
+fn load_knots(knots: &[photocraft_doc::Knot], from_start: bool) -> (Vec<[[f64; 2]; 3]>, Vec<usize>) {
+    let mut ks = knots.to_vec();
+    if from_start && ks.len() > 1 {
+        for k in &mut ks {
+            std::mem::swap(&mut k.in_ctrl, &mut k.out_ctrl);
+        }
+        ks.reverse();
+    }
+    let mut unlinked = Vec::new();
+    let triples = ks
+        .iter()
+        .enumerate()
+        .map(|(i, k)| {
+            let on = |p: photocraft_geom::Point| (p.x - k.anchor.x).abs() < 1e-9 && (p.y - k.anchor.y).abs() < 1e-9;
+            if !k.smooth && !(on(k.in_ctrl) && on(k.out_ctrl)) {
+                unlinked.push(i);
+            }
+            [[k.anchor.x, k.anchor.y], [k.in_ctrl.x, k.in_ctrl.y], [k.out_ctrl.x, k.out_ctrl.y]]
+        })
+        .collect();
+    (triples, unlinked)
+}
+
+fn near_point(p: photocraft_geom::Point, q: [f64; 2]) -> bool {
+    (p.x - q[0]).abs() < 1e-6 && (p.y - q[1]).abs() < 1e-6
+}
+
+/// True when continuing did not move a handle or add a point, so commit must not record a step.
+/// Continuing from the first anchor reverses the stored order; that alone is not a change.
+fn resume_unchanged(sp: &photocraft_doc::vector::Subpath, pen: &PenPath, closed: bool) -> bool {
+    if sp.closed != closed || sp.knots.len() != pen.knots.len() || sp.knots.is_empty() {
+        return false;
+    }
+    let from_start = sp.knots.len() > 1
+        && pen.knots.last().is_some_and(|k| near_point(sp.knots[0].anchor, k[0]))
+        && pen.knots.first().is_some_and(|k| sp.knots.last().is_some_and(|end| near_point(end.anchor, k[0])));
+    let (loaded, unlinked) = load_knots(&sp.knots, from_start);
+    pen.knots == loaded && pen.unlinked == unlinked
+}
+
+fn commit_resumed(app: &mut PhotocraftApp, pen: &PenPath, closed: bool) {
+    let Some(resume) = pen.resume.clone() else { return };
+    let current = match resume.name.as_str() {
+        "work" => app.session.active().and_then(|st| st.doc.work_path.clone()),
+        "layer" => resume
+            .layer
+            .and_then(|id| crate::direct_select::active_paths(app).into_iter().find_map(|(r, p)| (r == crate::direct_select::PathRef::Layer(id)).then_some(p))),
+        _ => None,
+    };
+    if current.and_then(|p| p.subpaths.get(resume.subpath).cloned()).is_some_and(|sp| resume_unchanged(&sp, pen, closed)) {
+        return;
+    }
+    let knots = pen_to_json(pen, closed)["subpaths"][0]["knots"].clone();
+    let mut params = json!({"subpath": resume.subpath, "closed": closed, "knots": knots, "name": resume.name});
+    if let Some(id) = resume.layer
+        && let Some(obj) = params.as_object_mut()
+    {
+        obj.insert("layer".into(), json!(id));
+    }
+    if let Err(e) = app.run("path.replaceSubpath", params) {
+        app.ui.pen = Some(pen.clone());
+        app.ui.status = e;
+        app.ui.status_error = true;
+    } else if resume.name == "work" {
+        app.ui.selected_path = Some("work".into());
+    }
+}
+
 /// Commit a finished Pen, Freeform Pen or Curvature Pen path, as one History step: a new shape
 /// layer (Shape mode), else a subpath of the targeted vector mask, else the work path.
 fn commit_path(app: &mut PhotocraftApp, pen: &PenPath, closed: bool) {
     if pen.knots.len() < 2 {
+        return;
+    }
+    if pen.resume.is_some() {
+        commit_resumed(app, pen, closed);
         return;
     }
     let path = pen_to_json(pen, closed);
