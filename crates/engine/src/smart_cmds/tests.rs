@@ -1,5 +1,6 @@
 use super::*;
 
+mod replace_fit;
 mod selection;
 mod stack_cache;
 
