@@ -86,7 +86,10 @@ what an agent can't finish alone.
   with PSD round trip (TYPE-218-6, #206), variable-font axes (TYPE-218-4, #2985).
 - **Evidence:** scorecard Type: 3 done, 2 partial, 4 missing. 2026-10-11: 2/3/4/5 clicks select
   word, line, paragraph and all text, with tests (TYPE-218-8, #3493). The Type tool froze the app for
-  60 s on one macOS machine (#2518).
+  60 s on one macOS machine (#2518). 2026-10-12: type whose font is not installed keeps the pixels
+  it was drawn with through Free Transform, Image Size and canvas rotation until its text is edited,
+  as in Photoshop (moves already did, #3218); a stored PostScript name that names an installed face
+  no longer counts as missing.
 - **Estimate:** 120–200 h.
 
 ### G11. Actions and scripting
@@ -288,6 +291,7 @@ what an agent can't finish alone.
 | 2026-10-13 | minor | G1: 16-bit Posterize bins the 16-bit sample, as Photoshop does (exact on two oracles); psd-tools floor → 241 of 309 |
 | 2026-10-13 | minor | G1: Gradient Map driven by the W3C luminosity (0.3, 0.59, 0.11), as Photoshop is; rgb8/rgb16 gradient-map pass; Photoshop-oracle floor 145 → 147 of 258 |
 | 2026-10-13 | minor | G6: stale "missing tool" list corrected against `main` — Color Replacement (`paint.colorReplacement`), Red Eye (`paint.redEye`) and Add/Delete Anchor Point (P flyout, #4144) are live tools, so the toolbox is 67 of 68 and Art History Brush is the only one missing; no percentage or estimate changed |
+| 2026-10-12 | minor | G8: type with a missing font keeps its drawn pixels through transforms and canvas changes; PostScript-name match counts as installed |
 | 2026-10-13 | minor | G4: Hue Jitter amount-track appearance (#3825, partial); no readiness percentage or estimate changed |
 | 2026-10-13 | minor | G4: minimum inputs in Shape Dynamics and Transfer follow their Control (#3825, partial); no readiness percentage or estimate changed |
 | 2026-10-12 | minor | G5: Free Transform options bar H/V skew fields done |

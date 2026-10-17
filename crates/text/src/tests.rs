@@ -1968,6 +1968,21 @@ fn engine_data_antialias_numbers_match_photoshop() {
     }
 }
 
+#[test]
+fn set_transform_patches_only_the_transform() {
+    let t = point("Moved", 24.0);
+    let tysh = crate::psd::build_tysh(&t, 72.0, Some([0.0, -20.0, 60.0, 4.0]));
+    let a = Affine { m: [2.0, 0.5, -0.5, 2.0, 140.0, -7.5] };
+    let out = crate::psd::set_transform(&tysh, &a).unwrap();
+    assert_eq!(out.len(), tysh.len());
+    assert_eq!(out[..2], tysh[..2]);
+    assert_eq!(out[50..], tysh[50..], "text, EngineData and bounds are kept byte for byte");
+    assert_eq!(crate::psd::parse_tysh(&out).unwrap().transform, a);
+    // Too short to hold a transform: no panic, no result.
+    assert!(crate::psd::set_transform(&tysh[..20], &a).is_none());
+    assert!(crate::psd::set_transform(&[], &a).is_none());
+}
+
 /// Type on a path (#218): along a vertical line the type runs top to bottom with its glyphs
 /// turned, along a curve it follows the curve, and glyphs beyond the end are not drawn.
 #[test]

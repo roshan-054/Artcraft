@@ -541,6 +541,40 @@ pub fn refresh(doc: &Document, t: &mut TextLayer) {
     t.psd_raw = Some(Arc::new(photocraft_text::psd::build_tysh(t, dpi, layout.bounds())));
 }
 
+/// Whether any run of `t` uses a font that is not installed.
+pub fn uses_missing_font(t: &TextLayer) -> bool {
+    let runs = t.char_runs();
+    let mut eng = photocraft_text::shared().lock().unwrap_or_else(|e| e.into_inner());
+    runs.iter().any(|r| crate::type_extra_cmds::style_font_missing(&mut eng.fonts, &r.style))
+}
+
+/// Whether a geometry-only change (move, transform, canvas) keeps this type layer's pixels
+/// instead of re-rendering it: its font is not installed, so a re-render would switch it to the
+/// fallback face. Photoshop keeps such a layer as it was drawn until its text is edited; its
+/// pixels move and transform as pixels.
+pub fn keeps_pixels(t: &TextLayer) -> bool {
+    t.cache.is_some() && uses_missing_font(t)
+}
+
+/// Brings a type layer's PSD `TySh` in line with its current transform without re-laying it
+/// out, so a layer whose font is missing keeps its file's text data as it was.
+pub fn retag_transform(t: &mut TextLayer) {
+    if let Some(d) = t.psd_raw.as_deref().and_then(|d| photocraft_text::psd::set_transform(d, &t.transform)) {
+        t.psd_raw = Some(Arc::new(d));
+    }
+}
+
+/// [`refresh`] after a geometry-only change whose pixels the caller has already mapped. A
+/// layer whose font is missing ([`keeps_pixels`]) keeps those pixels; only its `TySh`
+/// transform follows.
+pub fn refresh_geometry(doc: &Document, t: &mut TextLayer) {
+    if keeps_pixels(t) {
+        retag_transform(t);
+    } else {
+        refresh(doc, t);
+    }
+}
+
 /// Refuses to change a type layer under Lock All (its own or an enclosing group's), with
 /// Photoshop's message. Every command that edits a type layer's text calls it first (#3132, #4188).
 pub(crate) fn check_text_unlocked(doc: &Document, id: LayerId) -> Result<()> {

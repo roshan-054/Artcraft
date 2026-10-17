@@ -509,7 +509,7 @@ fn update_all(s: &mut Session) -> Result<Value> {
     Ok(json!({"updated": n}))
 }
 
-fn style_font_missing(fonts: &mut photocraft_text::FontDb, style: &photocraft_doc::text::CharStyle) -> bool {
+pub(crate) fn style_font_missing(fonts: &mut photocraft_text::FontDb, style: &photocraft_doc::text::CharStyle) -> bool {
     if style.font_family.is_empty() || fonts.has_family(&style.font_family) {
         return false;
     }
