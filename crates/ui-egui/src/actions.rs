@@ -105,9 +105,13 @@ pub(crate) fn play(app: &mut PhotocraftApp, params: &Value) -> Result<Value, Str
         // from the next step when it is confirmed (`resume`). Agents play headlessly.
         if action.dialogs.contains(&i) && !app.automation_input && (crate::filter_dialog::has_dialog(id) || crate::adjust_dialog::has_dialog(id)) {
             let label = label_of(id);
-            let dialog = crate::dialogs::open_command_dialog(app, id, &label);
+            let dialog = crate::adjust_dialog::open_with_params(app, id, p).unwrap_or_else(|| crate::dialogs::open_command_dialog(app, id, &label));
             if let Some(d) = app.ui.dialog_mut(dialog) {
-                if let Some(o) = p.as_object() {
+                // Adjustment dialogs already seeded and normalized these values for their
+                // effective target. Extending them again would restore discarded Lab/CMYK keys.
+                if !crate::adjust_dialog::has_dialog(id)
+                    && let Some(o) = p.as_object()
+                {
                     d.fields.extend(o.iter().map(|(k, v)| (k.clone(), v.clone())));
                 }
                 d.fields.insert(RESUME.into(), json!({"action": action.name, "from": i + 1}));
