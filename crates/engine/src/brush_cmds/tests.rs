@@ -764,6 +764,21 @@ fn mixer_brush_uses_the_brush_mixer_settings() {
 }
 
 #[test]
+fn stroke_without_fit_curve_follows_exact_polyline() {
+    let mut s = session(100, 100);
+    // Sharp L-turn at (50, 20): (20, 20) -> (50, 20) -> (50, 80).
+    let pts = json!([[20.0, 20.0], [50.0, 20.0], [50.0, 80.0]]);
+    // By default without fitCurve, paint.stroke follows the exact polyline through (50, 20).
+    s.execute("paint.stroke", json!({"points": pts, "size": 4, "hardness": 1.0, "color": "#0000ff"})).unwrap();
+    assert!(rgba(&s, 50, 20)[2] > 0.9, "corner point must be painted on the exact polyline");
+
+    // With fitCurve: true, the spline rounds the corner, cutting inside (50, 20).
+    let mut s_curve = session(100, 100);
+    s_curve.execute("paint.stroke", json!({"points": pts, "size": 4, "hardness": 1.0, "color": "#0000ff", "fitCurve": true})).unwrap();
+    assert!(rgba(&s_curve, 50, 20)[3] < 0.05, "spline cuts the corner, leaving (50, 20) untouched");
+}
+
+#[test]
 fn coalesced_set_brush_calls_journal_once_per_gesture() {
     let mut s = session(20, 20);
     let n = s.journal.len();
