@@ -364,6 +364,13 @@ no MCP framing, no app start-up per command. Configure its file access with the 
 `--automation-read-root` and `--automation-write-root` flags. Implementation:
 `crates/automation/src/rpc.rs`.
 
+`--color-settings <json>` applies `edit.colorSettings` params before the first request, for example
+`{"workingCmyk": "/profiles/swop.icc"}` so that CMYK files saved without a profile are read in that
+space. Clients cannot run `edit.colorSettings` themselves (it reads ambient profile paths), so the
+operator who starts the server chooses the working spaces. `doc.open` applies Color Settings as the
+app does when it opens a file: an untagged file takes a configured working space, and an embedded
+profile follows the open policy.
+
 | Method | Params |
 |---|---|
 | `engine.execute` | `{command, params?, wait?}`: any engine command (`wait: false` starts a long one as a background job: `{job, pending}`) |

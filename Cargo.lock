@@ -4705,6 +4705,7 @@ name = "photocraft-cli"
 version = "0.9.0"
 dependencies = [
  "photocraft-automation",
+ "photocraft-cms",
  "photocraft-codecs",
  "photocraft-engine",
  "photocraft-format",

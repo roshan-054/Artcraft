@@ -44,11 +44,12 @@ USAGE:
       [--automation-read-root <dir>] [--automation-write-root <dir>]
       Run the MCP server on stdio (headless engine, or bridge to a running `photocraft --control <port>`).
   photocraft-cli serve [--port <port>] [--control-token <64-hex> | --control-token-file <path>]
-      [--automation-read-root <dir>] [--automation-write-root <dir>]
+      [--automation-read-root <dir>] [--automation-write-root <dir>] [--color-settings <json>]
       Keep one headless session open and answer JSON lines ({\"id\",\"method\",\"params\"}) on stdio,
       or on 127.0.0.1:<port>. Methods: engine.execute, jobs.list/cancel, engine.commands,
       doc.open/new/place/save/exportLayers/exportDataSets/importDataSets/inspect/render/select/close, session.list, batch, methods
-      (docs/control-protocol.md#headless-server).
+      (docs/control-protocol.md#headless-server). --color-settings applies `edit.colorSettings` params
+      (e.g. {\"workingCmyk\":\"/path/swop.icc\"}) before the first request; clients cannot change them.
 
   photocraft-cli <subcommand> --help (or -h) prints this text. A flag the subcommand doesn't take is
   an error.
@@ -93,7 +94,7 @@ const SUBCOMMANDS: &[Subcommand] = &[
     },
     Subcommand {
         name: "serve",
-        values: &["--port", "--control-token", "--control-token-file", "--automation-read-root", "--automation-write-root"],
+        values: &["--port", "--control-token", "--control-token-file", "--automation-read-root", "--automation-write-root", "--color-settings"],
         bare: &[],
         run: |a, _, err| serve(a, err),
     },
@@ -555,7 +556,17 @@ fn commands(a: &Args, out: &mut dyn Write) -> R {
 
 fn serve(a: &Args, err: &mut dyn Write) -> R {
     use std::sync::{Arc, Mutex};
-    let h = Arc::new(Mutex::new(Headless::with_workspace(automation_workspace(a)?)));
+    let mut headless = Headless::with_workspace(automation_workspace(a)?);
+    // Operator settings, applied before any request. Clients stay gated: they may not run
+    // `edit.colorSettings`, so they cannot point the working spaces at another file.
+    if let Some(json) = a.get("--color-settings") {
+        let params: Value = serde_json::from_str(json).map_err(|e| format!("bad --color-settings: {e}"))?;
+        let gate = headless.session.authorize.take();
+        let applied = headless.session.execute("edit.colorSettings", params);
+        headless.session.authorize = gate;
+        applied.map_err(|e| format!("--color-settings: {e}"))?;
+    }
+    let h = Arc::new(Mutex::new(headless));
     match a.get("--port") {
         Some(port) => {
             let port: u16 = port.parse().map_err(|_| format!("bad --port `{port}`"))?;
