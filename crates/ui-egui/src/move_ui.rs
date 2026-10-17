@@ -48,6 +48,27 @@ pub(crate) fn float_selected(app: &mut PhotocraftApp, copy: bool, dx: f64, dy: f
     }
 }
 
+/// Most pixel memory the layers of a live Move drag may hold. Every frame of the drag shifts
+/// copies of them by a pixel offset that is rarely a whole tile, so a multi-gigabyte layer would
+/// copy gigabytes per pointer event on the UI thread and could run the machine out of memory
+/// (#6114, #6163). Past it the drag shows the outline and arrow, as with Preferences › Interface ›
+/// Show bounding box when dragging layer, and the release moves the layers once.
+const LIVE_LIMIT: u64 = 512 << 20;
+
+/// Bytes of pixel tiles stored by the layers `ids` of `doc` (their content and linked masks),
+/// which a live drag frame copies: whether they exceed `limit`.
+fn exceeds(doc: &Document, ids: &[LayerId], limit: u64) -> bool {
+    let bytes = |s: &photocraft_raster::Surface| s.tile_count() as u64 * (photocraft_geom::TILE_SIZE as u64).pow(2) * s.format().bytes_per_pixel() as u64;
+    let mut total = 0u64;
+    for l in ids.iter().filter_map(|id| doc.layer(*id)) {
+        total = total.saturating_add(l.surface().map_or(0, bytes)).saturating_add(l.mask.as_ref().map_or(0, |m| bytes(&m.surface)));
+        if total > limit {
+            return true;
+        }
+    }
+    false
+}
+
 /// Preview keys of move drags: `BASE + n`, one per offset shown (see `canvas::display_doc`).
 const BASE: u64 = 1 << 39;
 
@@ -68,6 +89,9 @@ pub(crate) struct MovePreview {
     shown: Option<Arc<Document>>,
     /// Shows a floating selection (`select.float`): offsets are the piece's, from where it was cut.
     floating: bool,
+    /// The moving layers hold more pixels than [`LIVE_LIMIT`]: they aren't copied for every frame
+    /// of the drag, which shows its outline and arrow alone (#6114, #6163).
+    too_big: bool,
 }
 
 impl MovePreview {
@@ -127,10 +151,14 @@ pub(crate) fn display_doc(app: &mut PhotocraftApp, idx: usize) -> Option<(Arc<Do
         let bounds = ids.iter().try_fold(Rect::EMPTY, |acc, id| Some(acc.union(&photocraft_compose::change_bounds(doc.layer(*id)?, all)?)));
         let canvas = doc.bounds();
         let moving = with_descendants(&doc, &ids);
+        let too_big = exceeds(&doc, &moving, LIVE_LIMIT);
         let bounds = bounds.map(|b| moving.iter().filter_map(|id| shape_reach(doc.layer(*id)?, canvas)).fold(b, |acc, r| acc.union(&r)));
-        app.move_preview = Some(MovePreview { doc: doc_id, revision, ids, moving, bounds, canvas, offsets: Vec::new(), shown: None, floating: false });
+        app.move_preview = Some(MovePreview { doc: doc_id, revision, ids, moving, bounds, canvas, offsets: Vec::new(), shown: None, floating: false, too_big });
     }
     let p = app.move_preview.as_mut()?;
+    if p.too_big {
+        return None;
+    }
     if offset == (0, 0) && p.offsets.is_empty() {
         return None;
     }
@@ -211,6 +239,7 @@ fn floating_doc(app: &mut PhotocraftApp, idx: usize) -> Option<(Arc<Document>, u
             offsets: Vec::new(),
             shown: None,
             floating: true,
+            too_big: false,
         });
     }
     let st = app.session.documents().get(idx)?;
@@ -389,6 +418,23 @@ mod tests {
         let shown = super::display_doc(&mut app, 0).is_some();
         assert_eq!(shown, super::showing(&app));
         shown
+    }
+
+    /// A layer past the pixel-memory limit isn't copied for each frame of a drag (#6114, #6163).
+    #[test]
+    fn layers_over_the_limit_are_not_followed_live() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        app.session.execute("file.new", json!({"width": 64, "height": 64})).unwrap();
+        app.session.execute("layer.new.layer", json!({})).unwrap();
+        app.session.execute("select.rect", json!({"x": 8, "y": 8, "width": 16, "height": 16})).unwrap();
+        app.session.execute("edit.fill", json!({"color": "#ff0000"})).unwrap();
+        let st = app.session.active().unwrap();
+        let id = st.active_layer.unwrap();
+        let one_tile = u64::from(photocraft_geom::TILE_SIZE.unsigned_abs()).pow(2) * 4;
+        assert!(super::exceeds(&st.doc, &[id], one_tile - 1), "a tile of pixels is over a limit below its size");
+        assert!(!super::exceeds(&st.doc, &[id], u64::MAX), "nothing is over an unlimited drag");
+        assert!(!super::exceeds(&st.doc, &[], 0), "no layers hold no pixels");
+        assert!(!super::exceeds(&st.doc, &[id], super::LIVE_LIMIT), "an ordinary layer follows the pointer");
     }
 
     #[test]
