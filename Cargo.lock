@@ -5038,6 +5038,7 @@ dependencies = [
  "sys-locale",
  "toml",
  "unicode-bidi",
+ "web-sys",
  "winsafe",
 ]
 
