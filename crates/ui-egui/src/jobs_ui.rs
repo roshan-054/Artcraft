@@ -192,8 +192,20 @@ pub fn run(app: &mut PhotocraftApp, id: &str, params: Value) -> Result<Value, St
 /// Open a file in the background: a tab appears at once and shows the progress; the document
 /// replaces it when decoded. `path` is remembered for File › Save and Open Recent.
 pub fn start_open(app: &mut PhotocraftApp, name: &str, path: Option<String>, source: OpenSource) -> Result<(), String> {
+    let opts = photocraft_engine::jobs::import_options(app.session.prefs());
+    start_open_with(app, name, path, source, opts)
+}
+
+/// [`start_open`] with explicit import settings (a PDF page's Import PDF answers).
+pub fn start_open_with(
+    app: &mut PhotocraftApp,
+    name: &str,
+    path: Option<String>,
+    source: OpenSource,
+    opts: photocraft_io::ImportOptions,
+) -> Result<(), String> {
     let name = &app.open_name(name);
-    match app.session.start_open(name, source).map_err(|e| e.to_string())? {
+    match app.session.start_open_with(name, source, opts).map_err(|e| e.to_string())? {
         // Inline (wasm): finish now, like a background open that ended at once.
         Started::Done(v) => finish_open(app, name, path.as_deref(), &v, None),
         Started::Job(job) => {

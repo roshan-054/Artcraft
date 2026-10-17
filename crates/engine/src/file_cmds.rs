@@ -472,12 +472,76 @@ fn tag_exr_colorspace(s: &Session, name: &str, doc: &mut Document) {
 }
 
 pub fn open_bytes_as(s: &mut Session, name: &str, bytes: &[u8], as_ext: Option<&str>, path: Option<String>) -> Result<Value> {
+    let opts = crate::jobs::import_options(s.prefs());
+    open_bytes_with(s, name, bytes, as_ext, path, &opts)
+}
+
+/// The Import PDF answers in a command's params (`page`, `resolution`, `crop`, `mode`, `depth`,
+/// `antiAlias`, `name`, `password`, `image`, `suppressWarnings`), or `None` when it names none:
+/// a PDF then opens with Photoshop's defaults (page 1, Bounding Box, 300 ppi, RGB, 8 bits).
+pub fn pdf_options(p: &Value) -> Result<Option<photocraft_io::pdf_import::PdfOpenOptions>> {
+    use photocraft_io::pdf_import::{CropTo, PdfOpenOptions};
+    let keys = ["page", "resolution", "crop", "mode", "depth", "antiAlias", "name", "password", "image", "suppressWarnings"];
+    if !keys.iter().any(|k| p.get(k).is_some()) {
+        return Ok(None);
+    }
+    let mut o = PdfOpenOptions::default();
+    if let Some(v) = p.get("page") {
+        o.page = v.as_u64().filter(|n| *n >= 1).ok_or_else(|| EngineError::Other("page: a page number from 1".into()))? as usize;
+    }
+    if let Some(v) = p.get("image") {
+        o.image = Some(v.as_u64().filter(|n| *n >= 1).ok_or_else(|| EngineError::Other("image: an image number from 1".into()))? as usize);
+    }
+    if let Some(v) = p.get("resolution") {
+        let r = v.as_f64().filter(|r| r.is_finite() && *r > 0.0).ok_or_else(|| EngineError::Other("resolution: pixels per inch".into()))?;
+        o.resolution = r as f32;
+    }
+    if let Some(v) = p.get("crop") {
+        let c = v.as_str().and_then(CropTo::from_id).ok_or_else(|| EngineError::Other("crop: boundingBox|mediaBox|cropBox|bleedBox|trimBox|artBox".into()))?;
+        o.crop = c;
+    }
+    if let Some(v) = p.get("mode") {
+        o.mode = match v.as_str().map(str::to_ascii_lowercase).as_deref() {
+            Some("rgb") => ColorMode::Rgb,
+            Some("gray" | "grayscale") => ColorMode::Grayscale,
+            Some("cmyk") => ColorMode::Cmyk,
+            Some("lab") => ColorMode::Lab,
+            _ => return Err(EngineError::Other("mode: rgb|gray|cmyk|lab".into())),
+        };
+    }
+    if let Some(v) = p.get("depth") {
+        o.depth = match v.as_u64() {
+            Some(8) => photocraft_color::SampleType::U8,
+            Some(16) => photocraft_color::SampleType::U16,
+            _ => return Err(EngineError::Other("depth: 8|16".into())),
+        };
+    }
+    if let Some(v) = p.get("antiAlias") {
+        o.anti_alias = v.as_bool().ok_or_else(|| EngineError::Other("antiAlias: true|false".into()))?;
+    }
+    if let Some(v) = p.get("suppressWarnings") {
+        o.suppress_warnings = v.as_bool().ok_or_else(|| EngineError::Other("suppressWarnings: true|false".into()))?;
+    }
+    o.name = p.get("name").and_then(Value::as_str).map(str::to_string);
+    o.password = p.get("password").and_then(Value::as_str).map(str::to_string);
+    Ok(Some(o))
+}
+
+/// [`open_bytes_as`] with explicit import settings.
+pub fn open_bytes_with(
+    s: &mut Session,
+    name: &str,
+    bytes: &[u8],
+    as_ext: Option<&str>,
+    path: Option<String>,
+    opts: &photocraft_io::ImportOptions,
+) -> Result<Value> {
     crate::allocation::checkpoint("importing document")?;
     let decode_name = match as_ext {
         Some(ext) => format!("{}.{}", stem(name), ext.trim_start_matches('.')),
         None => name.to_string(),
     };
-    let r = photocraft_io::import(&decode_name, bytes).map_err(|e| EngineError::Other(format!("{decode_name}: {e}")))?;
+    let r = photocraft_io::import_with_options(&decode_name, bytes, opts).map_err(|e| EngineError::Other(format!("{decode_name}: {e}")))?;
     let mut doc = r.document;
     tag_exr_colorspace(s, &decode_name, &mut doc);
     let path = match template_name(s, name) {
@@ -486,7 +550,10 @@ pub fn open_bytes_as(s: &mut Session, name: &str, bytes: &[u8], as_ext: Option<&
             None
         }
         None => {
-            doc.name = file_name(name);
+            // A PDF page is named by its import (`multi-2.pdf`): the file name would hide it.
+            if !photocraft_io::pdf_import::is_pdf(bytes) {
+                doc.name = file_name(name);
+            }
             path
         }
     };
@@ -503,7 +570,9 @@ fn open_as(s: &mut Session, p: &Value) -> Result<Value> {
     let path = str_param(p, "path", "file.openAs")?.to_string();
     let bytes = read_file(&path)?;
     let as_ext = p.get("as").or_else(|| p.get("format")).and_then(Value::as_str);
-    open_bytes_as(s, &path, &bytes, as_ext, Some(path.clone()))
+    let mut opts = crate::jobs::import_options(s.prefs());
+    opts.pdf = pdf_options(p)?;
+    open_bytes_with(s, &path, &bytes, as_ext, Some(path.clone()), &opts)
 }
 
 // ---------- place ----------
@@ -521,8 +590,9 @@ pub fn place_bytes(s: &mut Session, name: &str, bytes: Vec<u8>, linked: Option<S
     let (cw, ch) = (d.doc.size.width as f64, d.doc.size.height as f64);
     let fmt = d.doc.pixel_format();
     let vector = photocraft_io::svg::is_svg(&bytes);
-    let max_svg_group_depth = s.prefs().file_handling.rasterize_svg_groups_deeper_than as usize;
-    let imported = photocraft_io::import_with_svg_group_depth(name, &bytes, max_svg_group_depth).map_err(|e| EngineError::Other(format!("{name}: {e}")))?;
+    let mut opts = crate::jobs::import_options(s.prefs());
+    opts.pdf = pdf_options(p)?;
+    let imported = photocraft_io::import_with_options(name, &bytes, &opts).map_err(|e| EngineError::Other(format!("{name}: {e}")))?;
     if imported.preview_only {
         return Err(EngineError::Other(format!(
             "{name}: only this Affinity file's embedded preview could be read; open it with File › Open to see the warning, or export PSD or PNG from Affinity before using it here"
@@ -1603,7 +1673,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Open As…",
             &["File"],
             Some("Cmd+Alt+Shift+O"),
-            r##"{"path":str,"as":"psd|png|jpg|tiff|…"? (decode as this format)}"##,
+            r##"{"path":str,"as":"psd|png|jpg|tiff|…"? (decode as this format),"page":int? (PDF: the page, from 1),"resolution":ppi? (PDF: 300 by default),"crop":"boundingBox|mediaBox|cropBox|bleedBox|trimBox|artBox"? (PDF),"mode":"rgb|gray|cmyk|lab"? (PDF),"depth":8|16? (PDF),"antiAlias":bool? (PDF),"name":str? (PDF: the document name's stem),"image":int? (PDF: open embedded image N instead of a page),"password":str? (PDF),"suppressWarnings":bool? (PDF)}"##,
             native,
             open_as
         ),

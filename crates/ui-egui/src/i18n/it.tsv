@@ -4331,3 +4331,34 @@ shape	Appearance	Aspetto
 	GPU Memory (MB, 0 = Automatic)	Memoria GPU (MB, 0 = Automatico)
 	{name} was changed by another app after it was opened or saved here.	{name} è stato modificato da un'altra app dopo essere stato aperto o salvato qui.
 	Replace it with this document, or cancel and use File › Save As to keep both.	Sostituiscilo con questo documento, oppure annulla e usa File › Salva con nome per tenerli entrambi.
+
+# Import PDF (File › Open on a PDF, as Photoshop's dialog)
+	Import PDF	Importa PDF
+	The PDF is no longer available.	Il PDF non è più disponibile.
+	The PDF is protected by a password.	Il PDF è protetto da password.
+	Password:	Password:
+	Pages	Pagine
+	Images	Immagini
+	Select one or more images	Seleziona una o più immagini
+	{n} of {total} image(s) selected	Selezionate {n} immagini su {total}
+	{n} of {total} page(s) selected	Selezionate {n} pagine su {total}
+	Thumbnail Size:	Dimensione miniature:
+	Page Options	Opzioni pagina
+	Crop To:	Ritaglia a:
+	Image Size: --	Dimensione immagine: --
+	Image Size: {size}	Dimensione immagine: {size}
+	Constrain Proportions	Mantieni proporzioni
+	Bit Depth:	Profondità bit:
+	Suppress Warnings	Ignora avvisi
+	Open In Reverse Order	Apri in ordine inverso
+	Fit Page	Adatta alla pagina
+	Bounding Box	Rettangolo di selezione
+	Media Box	Riquadro supporto
+	Crop Box	Riquadro di ritaglio
+	Bleed Box	Riquadro di abbondanza
+	Trim Box	Riquadro di rifilo
+	Art Box	Riquadro grafico
+	That isn't the PDF's password.	Questa non è la password del PDF.
+	The PDF couldn't be read.	Impossibile leggere il PDF.
+	Select one or more pages.	Seleziona una o più pagine.
+	Select one or more images.	Seleziona una o più immagini.

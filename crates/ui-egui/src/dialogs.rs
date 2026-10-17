@@ -246,6 +246,9 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
             if web {
                 ui.set_max_width(available.x);
                 ui.set_min_size(available);
+            } else if crate::pdf_import_ui::owns(&d.fields) {
+                ui.set_min_width(crate::pdf_import_ui::WIDTH);
+                ui.set_max_width(crate::pdf_import_ui::WIDTH);
             } else if let Some(w) = crate::file_ui::dialog_width(&d.fields) {
                 ui.set_min_width(w);
                 ui.set_max_width(w);
@@ -340,6 +343,7 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
                     }
                 }
                 DialogKind::Command if crate::color_range_ui::owns(&fields) => crate::color_range_ui::body(app, ui, &mut fields),
+                DialogKind::Command if crate::pdf_import_ui::owns(&fields) => crate::pdf_import_ui::body(app, ui, &mut fields),
                 DialogKind::Command if crate::prefs_ui::owns(&fields) => crate::prefs_ui::body(app, ui, &mut fields),
                 DialogKind::Command if fields.contains_key("__export") => crate::export_dialog::body(app, ui, &mut fields),
                 // Image Size and Canvas Size open on Width, selected (#2329).
@@ -634,6 +638,7 @@ pub fn confirm(app: &mut PhotocraftApp, id: u64) -> Result<Value, String> {
         DialogKind::Command if crate::new_guide_ui::owns(&d.fields) => crate::new_guide_ui::confirm(app, &d.fields),
         DialogKind::Command if crate::color_picker_ui::owns(&d.fields) => crate::color_picker_ui::confirm(app, &d.fields),
         DialogKind::Command if crate::color_range_ui::owns(&d.fields) => crate::color_range_ui::confirm(app, &d.fields),
+        DialogKind::Command if crate::pdf_import_ui::owns(&d.fields) => crate::pdf_import_ui::confirm(app, &d.fields),
         DialogKind::Command if crate::prefs_ui::owns(&d.fields) => crate::prefs_ui::confirm(app, &d.fields),
         DialogKind::Command if d.fields.contains_key("__export") => crate::export_dialog::confirm(app, &d.fields),
         DialogKind::Command => {
@@ -682,6 +687,9 @@ pub fn cancel(app: &mut PhotocraftApp, id: u64) -> Result<Value, String> {
     app.ui.dialogs.retain(|d| !crate::layer_style::color_picker::child_of(&d.fields, id));
     app.filter_preview = None;
     app.color_range = None;
+    if crate::pdf_import_ui::owns(&closed.fields) {
+        app.pdf_import = None;
+    }
     crate::type_panels_ui::color_picker::prune(app);
     Ok(Value::Null)
 }

@@ -52,6 +52,7 @@ mod ora;
 pub use ora::losses as ora_losses;
 pub mod pattern_map;
 pub mod pdf;
+pub mod pdf_import;
 mod pdn;
 pub mod pixels;
 mod psd_export;
@@ -112,6 +113,9 @@ pub enum IoError {
     /// An SVG that does not parse (or is too large to rasterise).
     #[error("SVG: {0}")]
     Svg(String),
+    /// A PDF that can't be read or rasterised (see [`pdf_import`]).
+    #[error("PDF: {0}")]
+    Pdf(String),
     /// A background import or save was cancelled ([`import_with`], [`export_with`]).
     #[error("cancelled")]
     Cancelled,
@@ -236,8 +240,8 @@ pub fn is_psd(bytes: &[u8]) -> bool {
     bytes.starts_with(b"8BPS")
 }
 
-/// Imports a file. PSD/PSB, Affinity containers and camera raws are detected by magic; everything
-/// else is decoded with `photocraft-codecs`.
+/// Imports a file. PSD/PSB, Affinity containers, PDFs and camera raws are detected by magic;
+/// everything else is decoded with `photocraft-codecs`.
 pub fn import(name: &str, bytes: &[u8]) -> Result<ImportResult, IoError> {
     import_with_svg_group_depth(name, bytes, photocraft_doc::MAX_GROUP_DEPTH)
 }
@@ -261,14 +265,41 @@ pub fn import_with_svg_group_depth_and_interrupt(
     max_group_depth: usize,
     ctl: &photocraft_raster::Interrupt,
 ) -> Result<ImportResult, IoError> {
+    import_with_options_and_interrupt(name, bytes, &ImportOptions { max_group_depth, ..Default::default() }, ctl)
+}
+
+/// The user's settings that shape an import.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ImportOptions {
+    /// SVG groups nested deeper than this are rasterised.
+    pub max_group_depth: usize,
+    /// How a PDF page opens (the Import PDF dialog's answers); Photoshop's defaults when `None`:
+    /// page 1, Bounding Box, 300 ppi, RGB, 8 bits, anti-aliased.
+    pub pdf: Option<pdf_import::PdfOpenOptions>,
+}
+
+impl Default for ImportOptions {
+    fn default() -> Self {
+        ImportOptions { max_group_depth: photocraft_doc::MAX_GROUP_DEPTH, pdf: None }
+    }
+}
+
+/// [`import`] with the user's import settings.
+pub fn import_with_options(name: &str, bytes: &[u8], opts: &ImportOptions) -> Result<ImportResult, IoError> {
+    import_with_options_and_interrupt(name, bytes, opts, &photocraft_raster::Interrupt::NONE)
+}
+
+/// [`import_with`] with the user's import settings.
+pub fn import_with_options_and_interrupt(name: &str, bytes: &[u8], opts: &ImportOptions, ctl: &photocraft_raster::Interrupt) -> Result<ImportResult, IoError> {
     ctl.check().map_err(|_| IoError::Cancelled)?;
-    let r = import_stages(name, bytes, ctl, max_group_depth)?;
+    let r = import_stages(name, bytes, ctl, opts)?;
     ctl.check().map_err(|_| IoError::Cancelled)?;
     ctl.progress(1.0);
     Ok(r)
 }
 
-fn import_stages(name: &str, bytes: &[u8], ctl: &photocraft_raster::Interrupt, max_group_depth: usize) -> Result<ImportResult, IoError> {
+fn import_stages(name: &str, bytes: &[u8], ctl: &photocraft_raster::Interrupt, opts: &ImportOptions) -> Result<ImportResult, IoError> {
+    let max_group_depth = opts.max_group_depth;
     // A declared native extension must reach its loader so malformed bundles retain format errors.
     if has_extension(name, photocraft_format::EXTENSION) || photocraft_format::is_pcraft(bytes) {
         return Ok(ImportResult { document: photocraft_format::load_from_bytes(bytes)?, warnings: Vec::new(), source_read_only: false, preview_only: false });
@@ -306,6 +337,11 @@ fn import_stages(name: &str, bytes: &[u8], ctl: &photocraft_raster::Interrupt, m
     }
     if raw::is_raw(bytes) {
         return raw::import_raw(name, bytes);
+    }
+    // A PDF opens through the Import PDF options (a plain `import` takes Photoshop's defaults).
+    if pdf_import::is_pdf(bytes) {
+        let defaults = pdf_import::PdfOpenOptions::default();
+        return pdf_import::import_pdf(name, bytes, opts.pdf.as_ref().unwrap_or(&defaults), ctl);
     }
     if is_svg_input(name, bytes) {
         return svg::import_svg_with_group_depth(name, bytes, max_group_depth);

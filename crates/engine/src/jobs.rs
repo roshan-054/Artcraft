@@ -453,6 +453,11 @@ pub enum OpenSource {
 /// The command id open jobs report (there is no engine command: opening is the shell's).
 pub const OPEN_JOB: &str = "file.open";
 
+/// The import settings files are opened and placed with.
+pub fn import_options(prefs: &crate::prefs::Preferences) -> photocraft_io::ImportOptions {
+    photocraft_io::ImportOptions { max_group_depth: prefs.file_handling.rasterize_svg_groups_deeper_than as usize, pdf: None }
+}
+
 impl Session {
     /// Run the heavy part of inline (not background) job commands under `ctx`, so another thread
     /// can cancel them: a live preview whose parameters changed stops its stale computation
@@ -476,10 +481,15 @@ impl Session {
     /// result is `{held, name, warnings, color}` (`color` the question): take it with
     /// [`Session::take_held_open`] once answered.
     pub fn start_open(&mut self, name: &str, source: OpenSource) -> Result<Started> {
+        let opts = import_options(self.prefs());
+        self.start_open_with(name, source, opts)
+    }
+
+    /// [`Session::start_open`] with explicit import settings (a PDF page's Import PDF answers).
+    pub fn start_open_with(&mut self, name: &str, source: OpenSource, opts: photocraft_io::ImportOptions) -> Result<Started> {
         let label = format!("Opening {name}");
         let name_w = name.to_string();
         let name_a = name.to_string();
-        let max_svg_group_depth = self.prefs().file_handling.rasterize_svg_groups_deeper_than as usize;
         self.start_job(
             OPEN_JOB,
             json!({"name": name}),
@@ -493,12 +503,12 @@ impl Session {
                 };
                 ctx.check()?;
                 ctx.progress(0.02, "Decoding");
-                let imported = ctx
-                    .stage(0.02, 0.95, "Decoding", |ctl| photocraft_io::import_with_svg_group_depth_and_interrupt(&name_w, &bytes, max_svg_group_depth, ctl))
-                    .map_err(|e| match e {
+                let imported = ctx.stage(0.02, 0.95, "Decoding", |ctl| photocraft_io::import_with_options_and_interrupt(&name_w, &bytes, &opts, ctl)).map_err(
+                    |e| match e {
                         photocraft_io::IoError::Cancelled => EngineError::Cancelled,
                         e => EngineError::Other(e.to_string()),
-                    })?;
+                    },
+                )?;
                 ctx.progress(0.95, "Preparing layers");
                 warm_layer_bounds(&imported.document, || ctx.check())?;
                 Ok(imported)

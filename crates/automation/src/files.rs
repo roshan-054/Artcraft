@@ -5,7 +5,7 @@ use std::path::Path;
 
 use photocraft_doc::Document;
 use photocraft_format::{PcraftWriter, SaveOptions};
-use photocraft_io::ExportOptions;
+use photocraft_io::{ExportOptions, ImportOptions};
 
 use crate::AutomationError;
 
@@ -18,22 +18,32 @@ pub struct Opened {
 
 /// Decode a document that was read through a filesystem capability.
 pub fn open_bytes(name: &str, bytes: &[u8]) -> Result<Opened, AutomationError> {
+    open_bytes_with(name, bytes, &ImportOptions::default())
+}
+
+/// [`open_bytes`] with the import settings (a PDF page's Import PDF answers).
+pub fn open_bytes_with(name: &str, bytes: &[u8], opts: &ImportOptions) -> Result<Opened, AutomationError> {
     if Path::new(name).extension().is_some_and(|extension| extension.eq_ignore_ascii_case(photocraft_format::EXTENSION)) {
         return Ok(Opened { document: photocraft_format::load_from_bytes(bytes)?, warnings: Vec::new(), source_read_only: false });
     }
-    let r = photocraft_io::import(name, bytes)?;
+    let r = photocraft_io::import_with_options(name, bytes, opts)?;
     Ok(Opened { document: r.document, warnings: r.warnings, source_read_only: r.source_read_only })
 }
 
 /// Open a document from disk. Directory bundles and `.pcraft` ZIPs load
 /// natively; everything else goes through `photocraft-io` (PSD, PNG, …).
 pub fn open(path: &Path) -> Result<Opened, AutomationError> {
+    open_with(path, &ImportOptions::default())
+}
+
+/// [`open`] with the import settings.
+pub fn open_with(path: &Path, opts: &ImportOptions) -> Result<Opened, AutomationError> {
     if path.is_dir() {
         return Ok(Opened { document: photocraft_format::load_path(path)?, warnings: Vec::new(), source_read_only: false });
     }
     let bytes = photocraft_format::read_file(path).map_err(|e| AutomationError::Io(format!("{}: {e}", path.display())))?;
     let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    open_bytes(&name, &bytes)
+    open_bytes_with(&name, &bytes, opts)
 }
 
 /// Previews for a `.pcraft` bundle.

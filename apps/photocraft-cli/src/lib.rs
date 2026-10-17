@@ -69,8 +69,18 @@ struct Subcommand {
 }
 
 const SUBCOMMANDS: &[Subcommand] = &[
-    Subcommand { name: "convert", values: &["--format", "--quality", "--tga-bits", "--dpx-bits"], bare: &["--tiff-layers"], run: convert },
-    Subcommand { name: "info", values: &[], bare: &["--compact"], run: |a, out, _| info(a, out) },
+    Subcommand {
+        name: "convert",
+        values: &["--format", "--quality", "--tga-bits", "--dpx-bits", "--page", "--resolution", "--crop", "--mode", "--depth", "--image"],
+        bare: &["--tiff-layers", "--no-antialias"],
+        run: convert,
+    },
+    Subcommand {
+        name: "info",
+        values: &["--page", "--resolution", "--crop", "--mode", "--depth", "--image"],
+        bare: &["--compact", "--no-antialias"],
+        run: |a, out, _| info(a, out),
+    },
     Subcommand {
         name: "run",
         values: &["--new", "--cmd", "--params", "--out", "--format", "--quality", "--tga-bits", "--dpx-bits"],
@@ -244,12 +254,38 @@ fn convert(a: &Args, _out: &mut dyn Write, err: &mut dyn Write) -> R {
         return Err("convert needs <in> <out>".into());
     };
     let opts = export_opts(a)?;
-    let o = files::open(Path::new(input)).map_err(|e| e.to_string())?;
+    let o = files::open_with(Path::new(input), &import_opts(a)?).map_err(|e| e.to_string())?;
     warn_all(err, &o.warnings);
     warn_all(err, &photocraft_engine::type_extra_cmds::missing_font_warnings(&o.document));
     let ws = files::save(&o.document, Path::new(output), a.get("--format"), &opts, None).map_err(|e| e.to_string())?;
     warn_all(err, &ws);
     Ok(())
+}
+
+/// The Import PDF answers from `--page`, `--resolution`, `--crop`, `--mode`, `--depth`,
+/// `--no-antialias` and `--image` (`photocraft_engine::file_cmds::pdf_options` validates them);
+/// other files ignore them.
+fn import_opts(a: &Args) -> Result<photocraft_io::ImportOptions, String> {
+    let mut p = serde_json::Map::new();
+    for (flag, key) in [("--page", "page"), ("--image", "image"), ("--depth", "depth")] {
+        if let Some(v) = a.get(flag) {
+            let n: u64 = v.parse().map_err(|_| format!("{flag} needs a whole number"))?;
+            p.insert(key.into(), json!(n));
+        }
+    }
+    if let Some(v) = a.get("--resolution") {
+        let r: f64 = v.parse().map_err(|_| "--resolution needs a number (pixels per inch)".to_string())?;
+        p.insert("resolution".into(), json!(r));
+    }
+    for (flag, key) in [("--crop", "crop"), ("--mode", "mode")] {
+        if let Some(v) = a.get(flag) {
+            p.insert(key.into(), json!(v));
+        }
+    }
+    if a.has("--no-antialias") {
+        p.insert("antiAlias".into(), json!(false));
+    }
+    Ok(photocraft_io::ImportOptions { pdf: photocraft_engine::file_cmds::pdf_options(&Value::Object(p)).map_err(|e| e.to_string())?, ..Default::default() })
 }
 
 fn print_json(out: &mut dyn Write, v: &Value, compact: bool) -> R {
@@ -262,7 +298,8 @@ fn info(a: &Args, out: &mut dyn Write) -> R {
         return Err("info needs <file>".into());
     };
     let mut h = Headless::trusted_local();
-    let opened = h.open(Path::new(file)).map_err(|e| e.to_string())?;
+    let import = import_opts(a)?;
+    let opened = h.open_with(Path::new(file), &import).map_err(|e| e.to_string())?;
     let mut doc = h.inspect(None).map_err(|e| e.to_string())?;
     let mut warnings = opened["warnings"].as_array().cloned().unwrap_or_default();
     if let Some(st) = h.session.active() {
