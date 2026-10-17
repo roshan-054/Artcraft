@@ -544,6 +544,12 @@ pub struct Performance {
     pub gpu_memory_mb: u32,
     /// Memory budget of the layer-effect cache, in MB.
     pub effect_cache_mb: u32,
+    /// Memory budget of decoded smart-object contents, in MB (accounted at 4 bytes per
+    /// channel). The most recent decode is always kept.
+    pub smart_source_cache_mb: u32,
+    /// Memory budget of rendered smart-object placements and smart filter results, in MB; 0
+    /// keeps none (a render server, where each design is placed once).
+    pub smart_stage_cache_mb: u32,
     pub legacy_compositing: bool,
 }
 
@@ -575,6 +581,8 @@ impl Default for Performance {
             linux_display_server: LinuxDisplayServer::Auto,
             gpu_memory_mb: 0,
             effect_cache_mb: 768,
+            smart_source_cache_mb: 1024,
+            smart_stage_cache_mb: 768,
             legacy_compositing: false,
         }
     }
@@ -1030,6 +1038,8 @@ pub const HIDDEN_UNTIL_IMPLEMENTED: &[&str] = &[
     "fileHandling.saveInBackground",
     "performance.cacheLevels",
     "performance.effectCacheMb",
+    "performance.smartSourceCacheMb",
+    "performance.smartStageCacheMb",
     "performance.legacyCompositing",
     "scratchDisks.disks",
     "unitsAndRulers.columnWidth",
@@ -1117,6 +1127,7 @@ pub fn range(path: &str) -> Option<(f64, f64)> {
         "performance.cacheLevels" => (1.0, 8.0),
         "performance.cacheTileSize" => (256.0, 16384.0),
         "performance.effectCacheMb" => (16.0, 65536.0),
+        "performance.smartSourceCacheMb" | "performance.smartStageCacheMb" => (0.0, 65536.0),
         "transparencyAndGamut.gamutWarningOpacity" => (1.0, 100.0),
         "unitsAndRulers.columnWidth" | "unitsAndRulers.gutter" => (0.0, 10_000.0),
         "unitsAndRulers.printResolution" | "unitsAndRulers.screenResolution" | "rawDefaults.resolution" => (1.0, 10_000.0),
@@ -1630,6 +1641,9 @@ impl Session {
             st.trim_history();
         }
         photocraft_compose::set_effect_cache_budget(budget << 20);
+        let perf = &self.prefs().performance;
+        crate::smart_cmds::set_source_cache_budget((perf.smart_source_cache_mb as usize) << 20);
+        crate::smart_cmds::set_stage_cache_budget((perf.smart_stage_cache_mb as usize) << 20);
         // Without waiting for the system font scan: this runs on the UI thread at launch.
         photocraft_text::set_shared_missing_glyph_protection(self.prefs().type_.missing_glyph_protection());
         crate::plugin_cmds::sync_prefs(self);

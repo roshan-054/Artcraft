@@ -1,7 +1,13 @@
 use super::*;
 
+mod replace_fit;
 mod selection;
 mod stack_cache;
+
+/// The source cache is shared by every test thread: tests that shrink its budget (evicting
+/// everyone's entries) hold this for writing, tests that count decodes or reuse hold it for
+/// reading.
+static SOURCE_CACHE_TESTS: std::sync::RwLock<()> = std::sync::RwLock::new(());
 
 const DEPTHS: [u64; 3] = [8, 16, 32];
 const W: i32 = 64;

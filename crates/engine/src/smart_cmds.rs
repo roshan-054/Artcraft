@@ -70,6 +70,8 @@ pub fn encode_source(doc: &Document) -> Result<Vec<u8>> {
 
 /// Decodes smart-object contents (a `.pcraft` bundle, PSD/PSB, or any flat image format).
 pub fn decode_source(file_name: &str, bytes: &[u8]) -> Result<Document> {
+    #[cfg(test)]
+    DECODES.with(|d| d.set(d.get() + 1));
     crate::file_cmds::import(file_name, bytes).map_err(|e| other(format!("can't read smart object contents \"{file_name}\": {e}")))
 }
 
@@ -141,10 +143,65 @@ struct CacheEntry {
 /// a smart object never decodes its contents again.
 static SOURCE_CACHE: Mutex<Vec<CacheEntry>> = Mutex::new(Vec::new());
 const CACHE_ENTRIES: usize = 32;
+/// Default budget of [`SOURCE_CACHE`] in accounted bytes (4 per channel).
 const CACHE_BYTES: usize = 1 << 30;
+/// The budget in force (Preferences › Performance `smartSourceCacheMb`). The newest entry is
+/// kept whatever its size, so 0 keeps exactly one: a render server that decodes each design
+/// once still reuses it for the next template.
+static CACHE_BUDGET: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(CACHE_BYTES);
+
+/// Sets the source cache budget, dropping the oldest entries over it.
+pub fn set_source_cache_budget(bytes: usize) {
+    CACHE_BUDGET.store(bytes, std::sync::atomic::Ordering::Relaxed);
+    if let Ok(mut c) = SOURCE_CACHE.lock() {
+        trim_sources(&mut c, bytes);
+    }
+}
+
+/// Sets the rendered-stage cache budget (placements and smart filter results); 0 keeps none.
+pub fn set_stage_cache_budget(bytes: usize) {
+    stack_cache::set_budget(bytes);
+}
 
 fn cache_key(bytes: &[u8], fmt: PixelFormat) -> CacheKey {
     (*blake3::hash(bytes).as_bytes(), fmt)
+}
+
+/// Digest of a smart object's contents, memoised per shared buffer. Every instance of a smart
+/// object holds the same `Arc` of its file, so re-rendering N instances hashes the file once
+/// instead of twice per instance (an 80 MB print file through 15 instances was ~3 s of hashing).
+/// An entry keeps a `Weak`, which keeps the allocation (not the bytes) reserved: a later buffer
+/// can never be served a stale digest at a reused address, and `Arc::make_mut`/`get_mut` cannot
+/// change bytes in place while the entry exists.
+pub(crate) fn content_hash(bytes: &Arc<Vec<u8>>) -> [u8; 32] {
+    type Memo = Vec<(std::sync::Weak<Vec<u8>>, [u8; 32])>;
+    static MEMO: Mutex<Memo> = Mutex::new(Vec::new());
+    if let Ok(mut m) = MEMO.lock() {
+        m.retain(|(w, _)| w.strong_count() > 0);
+        if let Some((_, d)) = m.iter().find(|(w, _)| std::ptr::eq(w.as_ptr(), Arc::as_ptr(bytes))) {
+            return *d;
+        }
+    }
+    #[cfg(test)]
+    HASHES.with(|h| h.set(h.get() + 1));
+    let digest = *blake3::hash(bytes).as_bytes();
+    if let Ok(mut m) = MEMO.lock() {
+        if m.len() >= 16 {
+            m.remove(0);
+        }
+        m.push((Arc::downgrade(bytes), digest));
+    }
+    digest
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Files hashed by [`content_hash`] on this thread (tests check that instances share one).
+    pub(crate) static HASHES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// Files decoded by [`decode_source`] on this thread.
+    pub(crate) static DECODES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// Sources placed (transformed / warped) by [`place_in`] on this thread.
+    pub(crate) static PLACEMENTS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 fn cache_get(key: &CacheKey) -> Option<SourceImage> {
@@ -156,6 +213,38 @@ fn cache_get(key: &CacheKey) -> Option<SourceImage> {
     Some(img)
 }
 
+/// The source cache budget in force, in accounted bytes.
+fn source_budget() -> usize {
+    #[cfg(test)]
+    if let Some(b) = SOURCE_BUDGET_OVERRIDE.with(std::cell::Cell::get) {
+        return b;
+    }
+    CACHE_BUDGET.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+#[cfg(test)]
+thread_local! {
+    static SOURCE_BUDGET_OVERRIDE: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
+}
+
+/// Tests: a source cache budget for this thread only while alive.
+#[cfg(test)]
+pub(crate) struct SourceBudgetOverride(Option<usize>);
+
+#[cfg(test)]
+impl SourceBudgetOverride {
+    pub(crate) fn new(bytes: usize) -> Self {
+        Self(SOURCE_BUDGET_OVERRIDE.with(|o| o.replace(Some(bytes))))
+    }
+}
+
+#[cfg(test)]
+impl Drop for SourceBudgetOverride {
+    fn drop(&mut self) {
+        SOURCE_BUDGET_OVERRIDE.with(|o| o.set(self.0));
+    }
+}
+
 fn cache_put(key: CacheKey, image: SourceImage) {
     let Ok(mut c) = SOURCE_CACHE.lock() else { return };
     let decodes = match c.iter().position(|e| e.key == key) {
@@ -163,8 +252,14 @@ fn cache_put(key: CacheKey, image: SourceImage) {
         None => 1,
     };
     c.push(CacheEntry { key, image, decodes });
+    trim_sources(&mut c, source_budget());
+}
+
+/// Drops the oldest entries of `c` until it is within [`CACHE_ENTRIES`] and `budget`, always
+/// keeping the newest.
+fn trim_sources(c: &mut Vec<CacheEntry>, budget: usize) {
     let size = |e: &CacheEntry| e.image.bounds.width() as usize * e.image.bounds.height() as usize * e.key.1.channels() * 4;
-    while c.len() > CACHE_ENTRIES || (c.len() > 1 && c.iter().map(size).sum::<usize>() > CACHE_BYTES) {
+    while c.len() > CACHE_ENTRIES || (c.len() > 1 && c.iter().map(size).sum::<usize>() > budget) {
         c.remove(0);
     }
 }
@@ -218,22 +313,137 @@ fn vector_scale(sm: &SmartObject) -> f64 {
 
 /// The composited source image of `bytes` in pixel format `fmt` (decoded once, then cached).
 pub fn source_image(file_name: &str, bytes: &[u8], fmt: PixelFormat) -> Result<SourceImage> {
-    let key = cache_key(bytes, fmt);
+    source_image_keyed(file_name, bytes, cache_key(bytes, fmt))
+}
+
+/// [`source_image`] with the bytes' cache key already computed.
+fn source_image_keyed(file_name: &str, bytes: &[u8], key: CacheKey) -> Result<SourceImage> {
+    let fmt = key.1;
     if let Some(img) = cache_get(&key) {
         return Ok(img);
     }
-    let doc = decode_source(file_name, bytes)?;
-    let buf = photocraft_compose::flatten(&doc);
-    let img = SourceImage { surface: Arc::new(buffer_to_surface(&buf, fmt)), bounds: doc.bounds() };
+    let mut doc = decode_source(file_name, bytes)?;
+    let surface = match plain_layer_surface(&mut doc, fmt) {
+        Some(s) => s,
+        None => flatten_banded(&doc, fmt, SOURCE_BAND_PIXELS),
+    };
+    let img = SourceImage { surface: Arc::new(surface), bounds: doc.bounds() };
     cache_put(key, img.clone());
     Ok(img)
+}
+
+/// The pixels of `doc`'s only layer when flattening `doc` would give them back exactly (a placed
+/// PNG): a plain pixel layer (shown, Normal at 100 % opacity and fill, no masks, effects, blending
+/// options or clipping, transparent outside its tiles) inside the canvas of an RGB document,
+/// already in `fmt`, 8 or 16-bit. The composite of such a layer over nothing rounds back to its
+/// own values, and writes transparent pixels as zeros: so are they here. The layer's surface is
+/// moved out of `doc` (left with an empty one), not copied; `None` leaves `doc` untouched.
+fn plain_layer_surface(doc: &mut Document, fmt: PixelFormat) -> Option<Surface> {
+    let [l] = doc.layers.as_slice() else { return None };
+    let LayerContent::Raster(s) = &l.content else { return None };
+    let plain = l.visible
+        && l.blend == BlendMode::Normal
+        && l.opacity == 1.0
+        && l.fill_opacity == 1.0
+        && !l.clipped
+        && l.mask.is_none()
+        && l.vector_mask.is_none()
+        && !photocraft_compose::effects::has_effects(l)
+        && l.excluded_channels == 0
+        && l.blend_if == photocraft_doc::BlendIf::default()
+        && l.advanced == photocraft_doc::AdvancedBlending::default()
+        && l.video.is_none();
+    let exact = s.format() == fmt
+        && fmt.alpha
+        && fmt.mode == photocraft_color::ColorMode::Rgb
+        && doc.mode == photocraft_color::ColorMode::Rgb
+        && matches!(fmt.sample, photocraft_color::SampleType::U8 | photocraft_color::SampleType::U16)
+        && s.default_bytes().iter().all(|&b| b == 0);
+    if !(plain && exact && doc.bounds().contains_rect(&s.content_bounds())) {
+        return None;
+    }
+    let mut s = match doc.layers.first_mut().map(|l| &mut l.content) {
+        Some(LayerContent::Raster(s)) => std::mem::replace(s, Surface::new(fmt)),
+        _ => return None,
+    };
+    clear_transparent(&mut s);
+    s.prune();
+    Some(s)
+}
+
+/// Zeroes the colour of every fully transparent pixel, tiles in parallel: in one pass over a tile
+/// this surface alone holds, else (shared) only if it has such a pixel, after un-sharing it.
+fn clear_transparent(s: &mut Surface) {
+    let fmt = s.format();
+    let bpp = fmt.bytes_per_pixel();
+    let alpha = bpp - bpp / fmt.channels();
+    let clear = |p: &[u8]| p[alpha..].iter().all(|&b| b == 0) && p[..alpha].iter().any(|&b| b != 0);
+    let zero = |px: &mut [u8]| {
+        if bpp == 4 {
+            // 8-bit RGBA, the usual design: a branch-free loop the compiler vectorises.
+            for p in px.as_chunks_mut::<4>().0 {
+                let keep = u8::from(p[3] != 0).wrapping_neg();
+                for c in &mut p[..3] {
+                    *c &= keep;
+                }
+            }
+        } else {
+            for p in px.chunks_exact_mut(bpp).filter(|p| clear(p)) {
+                p.fill(0);
+            }
+        }
+    };
+    let fix = |(_, t): &mut (photocraft_geom::TileCoord, Arc<photocraft_raster::Tile>)| {
+        if let Some(own) = Arc::get_mut(t) {
+            zero(own.bytes_mut());
+        } else if t.bytes().chunks_exact(bpp).any(clear) {
+            zero(Arc::make_mut(t).bytes_mut());
+        }
+    };
+    let mut tiles = s.take_tiles(s.content_bounds());
+    {
+        use rayon::prelude::*;
+        tiles.par_iter_mut().for_each(fix);
+    }
+    s.put_tiles(tiles);
+}
+
+/// Pixels per band when a source is flattened: ~32 MB of floats.
+const SOURCE_BAND_PIXELS: u64 = 2 << 20;
+
+/// `doc` flattened into a surface in `fmt`, composited in bands of about `band_pixels`: the
+/// pixels of [`buffer_to_surface`] over [`photocraft_compose::flatten`], without the full-size
+/// float composite and the float copy converting it takes (~700 MB for a 22 MP design).
+fn flatten_banded(doc: &Document, fmt: PixelFormat, band_pixels: u64) -> Surface {
+    let n = fmt.channels();
+    let mut s = Surface::new(fmt);
+    let mut data = Vec::new();
+    let rows = (band_pixels / u64::from(doc.bounds().width().max(1))).clamp(1, i32::MAX as u64) as i32;
+    let _ = photocraft_compose::render_bands(doc, doc.bounds(), rows, |band| -> std::result::Result<(), ()> {
+        data.clear();
+        data.resize(band.px.len() * n, 0.0f32);
+        for (p, out) in band.px.iter().zip(data.chunks_exact_mut(n)) {
+            photocraft_raster::from_rgba_into(&fmt, *p, out);
+        }
+        if !band.rect.is_empty() {
+            s.write_region(band.rect, &data);
+        }
+        Ok(())
+    });
+    s.prune();
+    s
 }
 
 /// Layer › Smart Objects › Stack Mode: the source's layers (or, when it holds a single group, the
 /// group's layers) combined per pixel with `mode`. Cached like [`source_image`], keyed by mode.
 pub fn stack_image(file_name: &str, bytes: &[u8], fmt: PixelFormat, mode: photocraft_doc::StackMode) -> Result<SourceImage> {
+    stack_image_keyed(file_name, bytes, cache_key(bytes, fmt), mode)
+}
+
+/// [`stack_image`] with the bytes' cache key already computed.
+fn stack_image_keyed(file_name: &str, bytes: &[u8], mut key: CacheKey, mode: photocraft_doc::StackMode) -> Result<SourceImage> {
     use photocraft_algo::stack::Stat;
-    let mut key = cache_key(bytes, fmt);
+    let fmt = key.1;
     key.0 = *blake3::hash(&[&key.0[..], b"stack:", mode.id().as_bytes()].concat()).as_bytes();
     if let Some(img) = cache_get(&key) {
         return Ok(img);
@@ -329,8 +539,11 @@ fn apply_smart_filter(f: &SmartFilter, cur: &Surface, canvas: Rect, extent: Rect
     if f.blend == BlendMode::Normal && f.opacity >= 1.0 { Ok(out) } else { Ok(blend_surfaces(cur, &out, f.blend, f.opacity.clamp(0.0, 1.0))) }
 }
 
-/// The source placed in document pixels, before any smart filter.
-fn place(name: &str, bytes: &[u8], fmt: PixelFormat, sm: &SmartObject) -> Result<Surface> {
+/// The source placed in document pixels, before any smart filter; a warped raster placement is
+/// rendered only inside `clip` when given. `digest` is the bytes' blake3 when the caller has it.
+fn place_in(name: &str, bytes: &[u8], fmt: PixelFormat, sm: &SmartObject, clip: Option<Rect>, digest: Option<[u8; 32]>) -> Result<Surface> {
+    #[cfg(test)]
+    PLACEMENTS.with(|p| p.set(p.get() + 1));
     // A vector source is rendered at the placement's scale, and the placement is divided by
     // that scale so the rendered pixels land where the source units would.
     if sm.stack_mode.is_none() && sm.warp.is_none() && photocraft_io::svg::is_svg(bytes) {
@@ -349,14 +562,18 @@ fn place(name: &str, bytes: &[u8], fmt: PixelFormat, sm: &SmartObject) -> Result
             }
         });
     }
+    let key = match digest {
+        Some(d) => (d, fmt),
+        None => cache_key(bytes, fmt),
+    };
     let img = match sm.stack_mode {
-        Some(mode) => stack_image(name, bytes, fmt, mode)?,
-        None => source_image(name, bytes, fmt)?,
+        Some(mode) => stack_image_keyed(name, bytes, key, mode)?,
+        None => source_image_keyed(name, bytes, key)?,
     };
     // Through the warp (source space) and the transform in one pass; whole-pixel moves are exact.
     Ok(match &sm.perspective {
-        Some(p) => photocraft_algo::warp::place_source_projective(&img.surface, img.bounds, &Homography(*p), sm.warp.as_ref())?,
-        None => photocraft_algo::warp::place_source(&img.surface, img.bounds, &sm.transform, sm.warp.as_ref())?,
+        Some(p) => photocraft_algo::warp::place_source_projective_clipped(&img.surface, img.bounds, &Homography(*p), sm.warp.as_ref(), clip)?,
+        None => photocraft_algo::warp::place_source_clipped(&img.surface, img.bounds, &sm.transform, sm.warp.as_ref(), clip)?,
     })
 }
 
@@ -384,6 +601,11 @@ pub fn render(doc: &Document, sm: &SmartObject) -> Result<Option<Surface>> {
 /// is cancelled. Gives the same pixels as [`apply_smart_filters`] on the placed source, but
 /// starts from the deepest stage of the stack already rendered (see [`stack_cache`]).
 fn render_in(doc: &Document, sm: &SmartObject, ctx: &JobCtx) -> Result<Option<Surface>> {
+    render_opt(doc, sm, ctx, None)
+}
+
+/// [`render_in`]; with `clip`, a warped placement is rendered only inside that rect.
+fn render_opt(doc: &Document, sm: &SmartObject, ctx: &JobCtx, clip: Option<Rect>) -> Result<Option<Surface>> {
     // Stored filters can come from a file or another layer. Check before looking up cached
     // stages too: a trusted UI render may have populated this process-wide cache earlier.
     for filter in sm.smart_filters.iter().filter(|f| sm.filters_enabled && f.visible) {
@@ -391,12 +613,17 @@ fn render_in(doc: &Document, sm: &SmartObject, ctx: &JobCtx) -> Result<Option<Su
     }
     let Some((name, bytes)) = source_bytes(&doc.metadata, &sm.source) else { return Ok(None) };
     let (fmt, canvas) = (doc.pixel_format(), doc.bounds());
-    let placed_key = stack_cache::placed_key(&bytes, fmt, sm, canvas);
+    let digest = content_hash(&bytes);
+    let placed_key = stack_cache::placed_key(&digest, fmt, sm, canvas);
+    let placed_key = match clip {
+        Some(r) => stack_cache::clipped_key(&placed_key, r),
+        None => placed_key,
+    };
     let placed = || -> Result<Stage> {
         if let Some(stage) = stack_cache::get(&placed_key) {
             return Ok(stage);
         }
-        let surface = place(&name, &bytes, fmt, sm)?;
+        let surface = place_in(&name, &bytes, fmt, sm, clip, Some(digest))?;
         // Edge pixels repeat at the canvas ∪ placed-content edge, as for layer filters.
         let stage = Stage { extent: canvas.union(&surface.content_bounds()), surface };
         stack_cache::put(placed_key, &stage);
@@ -459,8 +686,12 @@ pub fn refresh_layer(doc: &Document, l: &mut Layer) -> Result<bool> {
 }
 
 fn refresh_layer_in(doc: &Document, l: &mut Layer, ctx: &JobCtx) -> Result<bool> {
+    refresh_layer_opt(doc, l, ctx, None)
+}
+
+fn refresh_layer_opt(doc: &Document, l: &mut Layer, ctx: &JobCtx, clip: Option<Rect>) -> Result<bool> {
     let LayerContent::Smart(sm) = &mut l.content else { return Ok(false) };
-    match render_in(doc, sm, ctx)? {
+    match render_opt(doc, sm, ctx, clip)? {
         Some(px) => {
             sm.cache = Some(px);
             Ok(true)
@@ -475,11 +706,15 @@ pub fn refresh(doc: &mut Document, id: LayerId) -> Result<bool> {
 }
 
 fn refresh_in(doc: &mut Document, id: LayerId, ctx: &JobCtx) -> Result<bool> {
+    refresh_opt(doc, id, ctx, None)
+}
+
+fn refresh_opt(doc: &mut Document, id: LayerId, ctx: &JobCtx, clip: Option<Rect>) -> Result<bool> {
     let mut l = doc.layer(id).cloned().ok_or(EngineError::NoLayer(id))?;
     if !matches!(l.content, LayerContent::Smart(_)) {
         return Err(other("the layer is not a smart object"));
     }
-    let ok = refresh_layer_in(doc, &mut l, ctx)?;
+    let ok = refresh_layer_opt(doc, &mut l, ctx, clip)?;
     if ok && let Some(dst) = doc.layer_mut(id) {
         dst.content = l.content;
     }
@@ -488,6 +723,15 @@ fn refresh_in(doc: &mut Document, id: LayerId, ctx: &JobCtx) -> Result<bool> {
 
 fn refresh_or_fail(doc: &mut Document, id: LayerId) -> Result<()> {
     refresh_or_fail_in(doc, id, &JobCtx::new())
+}
+
+/// [`refresh_or_fail`]; with `clip`, a warped placement is rendered only inside that rect.
+fn refresh_or_fail_opt(doc: &mut Document, id: LayerId, clip: Option<Rect>) -> Result<()> {
+    if refresh_opt(doc, id, &JobCtx::new(), clip)? {
+        Ok(())
+    } else {
+        Err(other("the smart object's contents are unavailable (missing linked file?), so it can't be re-rendered"))
+    }
 }
 
 fn refresh_or_fail_in(doc: &mut Document, id: LayerId, ctx: &JobCtx) -> Result<()> {
@@ -805,15 +1049,49 @@ fn set_source(s: &mut Session, p: &Value, label: &str, keep_psd: bool, make: imp
 
 // Keep the shared-instance transaction out of the per-command source-builder instantiations.
 fn set_shared_source(s: &mut Session, id: LayerId, label: &str, keep_psd: bool, new: SmartSource) -> Result<Value> {
+    set_shared_source_fit(s, id, label, keep_psd, new, None, false)
+}
+
+/// Stretching new contents over the old: the new source's box, and each instance's old box (see
+/// [`authored_boxes`]). With `contain`, the new box is first grown to each old box's aspect
+/// around its centre (see [`contain_box`]), so the new contents keep theirs.
+struct Stretch {
+    to: [f64; 4],
+    from: Vec<(LayerId, [f64; 4])>,
+    contain: bool,
+}
+
+/// [`set_shared_source`]; with `stretch`, re-aiming every instance's placement so the new
+/// source's box lands where its old box did.
+fn set_shared_source_fit(s: &mut Session, id: LayerId, label: &str, keep_psd: bool, new: SmartSource, stretch: Option<Stretch>, clip: bool) -> Result<Value> {
     let (parent, contents_id, changed) = s.edit(label, |doc, _| {
         let contents_id = smart(doc, id)?.contents_id;
         let changed = instances(doc, contents_id);
+        // The instances all warp the new contents: one reduced copy of them serves every shrink,
+        // and instances at one place share their placement.
+        let _levels = photocraft_algo::warp::reuse_levels();
+        let _stages = stack_cache::reuse_stages();
         for &instance in &changed {
+            if let Some(st) = &stretch {
+                let old_box = st.from.iter().find(|(l, _)| *l == instance).map(|(_, b)| *b).ok_or(EngineError::NoLayer(instance))?;
+                let to = if st.contain { contain_box(old_box, st.to) } else { st.to };
+                stretch_placement(smart_mut(doc, instance)?, old_box, to);
+            }
             smart_mut(doc, instance)?.source = new.clone();
             if !keep_psd {
                 detach_psd(doc.layer_mut(instance).ok_or(EngineError::NoLayer(instance))?);
             }
-            refresh_or_fail(doc, instance)?;
+            // A hidden instance (or one in a hidden group) is not in the flattened document: with
+            // `clip`, it is left unrendered, like the parts of the others past the canvas.
+            if clip && hidden_in(doc, instance) {
+                smart_mut(doc, instance)?.cache = None;
+                continue;
+            }
+            // Effects follow the layer's edge and bounds, and smart filters read past the canvas:
+            // such an instance is rendered whole, so the flattened result stays the same.
+            let layer = doc.layer(instance).ok_or(EngineError::NoLayer(instance))?;
+            let clip_this = (clip && !needs_whole_render(layer)).then(|| visible_clip(layer, doc.bounds()));
+            refresh_or_fail_opt(doc, instance, clip_this)?;
         }
         Ok((doc.id, contents_id, changed))
     })?;
@@ -826,16 +1104,161 @@ fn set_shared_source(s: &mut Session, id: LayerId, label: &str, keep_psd: bool, 
 }
 
 fn replace_contents(s: &mut Session, p: &Value) -> Result<Value> {
+    let fit = fit_param(p)?;
+    let clip = match p.get("clipToCanvas") {
+        None | Some(Value::Null) => false,
+        Some(Value::Bool(b)) => *b,
+        Some(o) => return Err(other(format!("`clipToCanvas` must be true or false, not {o}"))),
+    };
     let path = path_param("layer.smartObjects.replaceContents", p)?.to_string();
     let bytes = photocraft_format::read_file(std::path::Path::new(&path)).map_err(|e| other(format!("can't read {path}: {e}")))?;
     let id = layer_param(s, p)?;
-    replace_contents_bytes(s, id, &base_name(&path), bytes)
+    replace_contents_with(s, id, &base_name(&path), bytes, fit, clip)
+}
+
+/// How Replace Contents places a file of another size than the old contents.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Fit {
+    /// The new file keeps its own pixel size through the old placement (the default).
+    Keep,
+    /// The new file fills the old contents' box, whatever its size (what mockup templates expect).
+    Stretch,
+    /// The new file is scaled to fit inside the old contents' box, keeping its aspect ratio, and
+    /// centred in it; the rest of the box stays empty.
+    Contain,
+}
+
+fn fit_param(p: &Value) -> Result<Fit> {
+    match p.get("fit") {
+        None | Some(Value::Null) => Ok(Fit::Keep),
+        Some(Value::String(f)) if f == "keep" => Ok(Fit::Keep),
+        Some(Value::String(f)) if f == "stretch" => Ok(Fit::Stretch),
+        Some(Value::String(f)) if f == "contain" => Ok(Fit::Contain),
+        Some(o) => Err(other(format!("`fit` must be \"keep\", \"stretch\" or \"contain\", not {o}"))),
+    }
 }
 
 /// Replace Contents from a file's name and bytes: what the desktop and web file pickers hand over.
 pub fn replace_contents_bytes(s: &mut Session, id: LayerId, file_name: &str, bytes: Vec<u8>) -> Result<Value> {
-    decode_source(file_name, &bytes)?; // fail before touching the document
-    set_shared_source(s, id, "Replace Contents", false, SmartSource::Embedded { file_name: file_name.to_string(), bytes: Arc::new(bytes) })
+    replace_contents_fit(s, id, file_name, bytes, Fit::Keep)
+}
+
+/// [`replace_contents_bytes`] with a [`Fit`].
+pub fn replace_contents_fit(s: &mut Session, id: LayerId, file_name: &str, bytes: Vec<u8>, fit: Fit) -> Result<Value> {
+    replace_contents_with(s, id, file_name, bytes, fit, false)
+}
+
+/// [`replace_contents_fit`]; with `clip_to_canvas`, warped instances without layer effects or
+/// visible smart filters are rendered only inside the canvas (and their layer mask's revealed
+/// area), and hidden instances not at all. What a flattened export of the document shows is the
+/// same, at a fraction of the cost when a placement is much larger than the canvas; the parts
+/// left out are gone from the layer (a hidden instance shows nothing) until something
+/// re-renders it in full (Undo restores the previous contents as before).
+pub fn replace_contents_with(s: &mut Session, id: LayerId, file_name: &str, bytes: Vec<u8>, fit: Fit, clip_to_canvas: bool) -> Result<Value> {
+    // Decode now (fail before touching the document) into the source cache, under the key the
+    // re-render below looks up, so the new file is decoded once.
+    let doc = &s.active().ok_or(EngineError::NoDocument)?.doc;
+    let fmt = doc.pixel_format();
+    // The old boxes first: without a stored size they decode the old contents, which must not
+    // push the new file out of a small source cache.
+    let from = match fit {
+        Fit::Stretch | Fit::Contain => Some(authored_boxes(doc, id)?),
+        Fit::Keep => None,
+    };
+    let bytes = Arc::new(bytes);
+    let b = source_image_keyed(file_name, &bytes, (content_hash(&bytes), fmt))?.bounds;
+    let contain = fit == Fit::Contain;
+    let stretch = from.map(|from| Stretch { to: [f64::from(b.x0), f64::from(b.y0), f64::from(b.x1), f64::from(b.y1)], from, contain });
+    set_shared_source_fit(s, id, "Replace Contents", false, SmartSource::Embedded { file_name: file_name.to_string(), bytes }, stretch, clip_to_canvas)
+}
+
+/// Whether a smart object layer must be rendered whole for the flattened document to be right:
+/// layer effects lay out against the layer's bounds and edges (strokes, inner shadows, aligned
+/// gradients and patterns), and smart filters sample beyond the canvas.
+fn needs_whole_render(l: &Layer) -> bool {
+    let filtered = matches!(&l.content, LayerContent::Smart(sm) if sm.filters_enabled && sm.smart_filters.iter().any(|f| f.visible));
+    photocraft_compose::effects::has_effects(l) || filtered
+}
+
+/// Whether `id` or a group around it is hidden, so it shows nowhere in the flattened document.
+fn hidden_in(doc: &Document, id: LayerId) -> bool {
+    doc.path_of(id).is_some_and(|p| (1..=p.len()).any(|n| doc.layer_at(&p[..n]).is_some_and(|l| !l.visible)))
+}
+
+/// The part of `canvas` where `l` can show anything given its own layer mask: inside the mask's
+/// painted area when the mask hides by default at full density (plus its feather), else the
+/// whole canvas. Group masks and clipping can only hide more, so this is never too small.
+fn visible_clip(l: &Layer, canvas: Rect) -> Rect {
+    match &l.mask {
+        Some(m) if m.enabled && m.density >= 1.0 && m.surface.default_pixel().first().copied().unwrap_or(1.0) <= 0.0 => {
+            let pad = (f64::from(m.feather.max(0.0)) * 3.0).ceil() as i32 + 1;
+            m.surface.content_bounds().inflate(pad).intersect(&canvas)
+        }
+        _ => canvas,
+    }
+}
+
+/// The box (source pixels) each instance of `id`'s contents was authored for: its `soLD` stored
+/// size when the layer came from a PSD (cheap), else the box of the decoded contents, which the
+/// instances share (decoded once).
+fn authored_boxes(doc: &Document, id: LayerId) -> Result<Vec<(LayerId, [f64; 4])>> {
+    let mut decoded = None;
+    instances(doc, smart(doc, id)?.contents_id)
+        .into_iter()
+        .map(|l| {
+            let sm = smart(doc, l)?;
+            let stored =
+                sm.psd_raw.as_deref().and_then(|d| photocraft_io::smart_map::parse_sold(d)).and_then(|p| photocraft_io::smart_map::stored_size(&p.descriptor));
+            let b = match stored {
+                Some((w, h)) => Some([0.0, 0.0, w, h]),
+                None => *decoded.get_or_insert_with(|| source_box(doc, sm)),
+            };
+            Ok((l, b.ok_or_else(|| other("the smart object's contents are unavailable, so their box is unknown"))?))
+        })
+        .collect()
+}
+
+/// The box around `new`'s centre with `old`'s aspect ratio that just holds `new`: stretching it
+/// onto `old` scales `new` uniformly to fit inside `old`, centred. Degenerate boxes are returned
+/// as they are ([`stretch_placement`] leaves those placements alone).
+fn contain_box(old: [f64; 4], new: [f64; 4]) -> [f64; 4] {
+    let (ow, oh, nw, nh) = (old[2] - old[0], old[3] - old[1], new[2] - new[0], new[3] - new[1]);
+    if !(ow > 0.0 && oh > 0.0 && nw > 0.0 && nh > 0.0) || [ow, oh, nw, nh].iter().any(|v| !v.is_finite()) {
+        return new;
+    }
+    let k = (ow / nw).min(oh / nh);
+    let (w, h) = (ow / k, oh / k);
+    let (cx, cy) = ((new[0] + new[2]) / 2.0, (new[1] + new[3]) / 2.0);
+    [cx - w / 2.0, cy - h / 2.0, cx + w / 2.0, cy + h / 2.0]
+}
+
+/// Re-aims `sm`'s placement so that the box `new` (source pixels of new contents) lands where
+/// `old` did: the map becomes `placement ∘ S` with `S` taking `new` onto `old`. A warp absorbs
+/// `S` in its box (a preset first becomes its exact mesh); without one, `S` joins the
+/// perspective or the affine transform.
+fn stretch_placement(sm: &mut SmartObject, old: [f64; 4], new: [f64; 4]) {
+    let (ow, oh, nw, nh) = (old[2] - old[0], old[3] - old[1], new[2] - new[0], new[3] - new[1]);
+    if !(ow > 0.0 && oh > 0.0 && nw > 0.0 && nh > 0.0) || [ow, oh, nw, nh].iter().any(|v| !v.is_finite()) || old == new {
+        return;
+    }
+    let (kx, ky) = (ow / nw, oh / nh);
+    let (tx, ty) = (old[0] - kx * new[0], old[1] - ky * new[1]);
+    if let Some(w) = sm.warp.as_mut().filter(|w| !w.is_identity()) {
+        // A warp normalises over its box `B`, so `W ∘ S` is the same warp over `S⁻¹(B)`.
+        if w.style != photocraft_geom::warp::WarpStyle::Custom {
+            *w = photocraft_geom::warp::Warp::custom(w.to_mesh(1, 1), w.bounds);
+        }
+        let b = w.bounds;
+        w.bounds = [(b[0] - tx) / kx, (b[1] - ty) / ky, (b[2] - tx) / kx, (b[3] - ty) / ky];
+        return;
+    }
+    if let Some(h) = sm.perspective.as_mut() {
+        let [a, b, c, d, e, f, g, i, j] = *h;
+        // H · S, row-major, S = [kx 0 tx; 0 ky ty; 0 0 1].
+        *h = [a * kx, b * ky, a * tx + b * ty + c, d * kx, e * ky, d * tx + e * ty + f, g * kx, i * ky, g * tx + i * ty + j];
+        return;
+    }
+    sm.transform = sm.transform.mul(&Affine { m: [kx, 0.0, 0.0, ky, tx, ty] });
 }
 
 /// The file name and bytes of smart object `id`'s contents.
@@ -1218,7 +1641,14 @@ pub fn specs() -> Vec<CommandSpec> {
             let i = s.active_index().ok_or(EngineError::NoDocument)?;
             Ok(json!({"updated": commit_child(s, i)?}))
         }),
-        spec!("layer.smartObjects.replaceContents", "Replace Contents…", SO, r##"{"layer":id?,"path":str}"##, has_smart, replace_contents),
+        spec!(
+            "layer.smartObjects.replaceContents",
+            "Replace Contents…",
+            SO,
+            r##"{"layer":id?,"path":str,"fit":"keep|stretch|contain"="keep","clipToCanvas":bool=false}"##,
+            has_smart,
+            replace_contents
+        ),
         spec!(
             "layer.smartObjects.exportContents",
             "Export Contents…",

@@ -3214,3 +3214,14 @@ fn concurrent_effect_identity_misses_compute_once() {
     });
     assert_eq!(keys.built.load(std::sync::atomic::Ordering::Relaxed), 1, "concurrent cache misses must compute one memoized identity");
 }
+
+#[test]
+fn an_effect_cache_hit_makes_the_entry_the_newest() {
+    // Eviction takes the oldest first: maps used by every render (layers a render server never
+    // changes) must outlive maps of layers that changed and will not be asked for again.
+    let mut order: std::collections::VecDeque<u64> = [1, 2, 3].into_iter().collect();
+    touch_effect_entry(&mut order, 1);
+    assert_eq!(order.iter().copied().collect::<Vec<_>>(), [2, 3, 1]);
+    touch_effect_entry(&mut order, 1);
+    assert_eq!(order.iter().copied().collect::<Vec<_>>(), [2, 3, 1]);
+}

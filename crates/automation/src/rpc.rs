@@ -43,6 +43,7 @@ pub const METHODS: &[&str] = &[
     "session.list",
     "doc.open",
     "doc.place",
+    "doc.replaceContents",
     "doc.new",
     "doc.save",
     "doc.exportLayers",
@@ -108,6 +109,10 @@ impl Headless {
                 opts.remove("index");
                 self.place(index_of(&p)?, path, &Value::Object(opts))
             }
+            "doc.replaceContents" => {
+                let path = str_of(&p, "path").ok_or_else(|| bad("doc.replaceContents needs `path`"))?;
+                self.replace_contents(index_of(&p)?, path, &p)
+            }
             "doc.new" => self.command_run("file.new", p),
             "doc.save" => {
                 let tga_bits = photocraft_engine::file_cmds::tga_bits_param(&p, "doc.save").map_err(|e| bad(e.to_string()))?;
@@ -118,6 +123,15 @@ impl Headless {
                     opts.encode.jpeg_quality = q.clamp(1, 100) as u8;
                     opts.encode.webp_quality = q.clamp(1, 100) as u8;
                     opts.encode.webp_lossless = false;
+                }
+                if let Some(c) = p.get("pngCompression") {
+                    opts.encode.png_compression = match c.as_str() {
+                        Some("none") => photocraft_codecs::PngCompression::None,
+                        Some("fast") => photocraft_codecs::PngCompression::Fast,
+                        Some("default") => photocraft_codecs::PngCompression::Default,
+                        Some("best") => photocraft_codecs::PngCompression::Best,
+                        _ => return Err(bad(format!("`pngCompression` must be \"none\", \"fast\", \"default\" or \"best\", not {c}"))),
+                    };
                 }
                 let path = str_of(&p, "path").map(PathBuf::from);
                 self.save(index_of(&p)?, path.as_deref(), str_of(&p, "format"), &opts)
@@ -677,6 +691,103 @@ mod tests {
         assert!(trusted["layer"].as_u64().is_some(), "{trusted}");
         // Release directory capabilities before cleanup on Windows.
         drop(t);
+        drop(h);
+        std::fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    fn doc_replace_contents_reads_through_the_read_root_and_never_outside_it() {
+        let base = std::env::temp_dir().join(format!("pc-doc-replace-{}", std::process::id()));
+        let root = base.join("workspace");
+        let outside = base.join("outside");
+        for dir in [&root, &outside] {
+            std::fs::create_dir_all(dir).unwrap();
+        }
+        let png = |w: u32, h: u32, v: u8| {
+            let img = photocraft_codecs::Image::from_u8(w, h, photocraft_codecs::ChannelLayout::Rgb, vec![v; (w * h * 3) as usize]).unwrap();
+            photocraft_codecs::encode(&img, photocraft_codecs::Format::Png, &Default::default()).unwrap()
+        };
+        std::fs::write(root.join("logo.png"), png(8, 6, 42)).unwrap();
+        std::fs::write(root.join("design.png"), png(4, 3, 200)).unwrap();
+        std::fs::write(outside.join("design.png"), png(4, 3, 9)).unwrap();
+        let absolute = outside.join("design.png").to_string_lossy().into_owned();
+        let bounds = |h: &mut Headless, layer: u64| {
+            let inspected = h.handle("doc.inspect", json!({})).unwrap();
+            inspected["layers"].as_array().unwrap().iter().find(|l| l["id"].as_u64() == Some(layer)).unwrap()["bounds"].clone()
+        };
+
+        let mut h = Headless::with_workspace(crate::AuthorizedWorkspace::new(Some(&root), Some(&root)).unwrap());
+        h.handle("doc.new", json!({"width": 40, "height": 30})).unwrap();
+        let layer = h.handle("doc.place", json!({"path": "logo.png", "scale": 100, "fit": false})).unwrap()["layer"].as_u64().unwrap();
+        let placed = bounds(&mut h, layer);
+        // `fit: "stretch"` lands the 4 × 3 file on the 8 × 6 placement.
+        let replaced = h.handle("doc.replaceContents", json!({"layer": layer, "path": "design.png", "fit": "stretch"})).unwrap();
+        assert_eq!(replaced["layer"].as_u64(), Some(layer), "{replaced}");
+        assert_eq!(bounds(&mut h, layer), placed);
+        // One undo step restores the old contents.
+        h.handle("engine.execute", json!({"command": "edit.undo"})).unwrap();
+        assert_eq!(bounds(&mut h, layer), placed);
+        // `fit: "contain"` fits a 2 × 6 file inside the 8 × 6 placement: same size, centred
+        // (bounds are x, y, width, height).
+        std::fs::write(root.join("tall.png"), png(2, 6, 7)).unwrap();
+        h.handle("doc.replaceContents", json!({"layer": layer, "path": "tall.png", "fit": "contain"})).unwrap();
+        let p = |i: usize| placed[i].as_i64().unwrap();
+        assert_eq!(bounds(&mut h, layer), json!([p(0) + 3, p(1), 2, 6]));
+        h.handle("engine.execute", json!({"command": "edit.undo"})).unwrap();
+        assert_eq!(bounds(&mut h, layer), placed);
+        // Without `fit` the file keeps its pixel size.
+        h.handle("doc.replaceContents", json!({"layer": layer, "path": "design.png"})).unwrap();
+        let kept = bounds(&mut h, layer);
+        assert_eq!((kept[2].as_i64(), kept[3].as_i64()), (Some(4), Some(3)), "{kept}");
+        // Outside the read root, refused like doc.place; the document is unchanged.
+        for (path, reason) in [("../outside/design.png", "parent traversal"), (absolute.as_str(), "must be inside the automation root")] {
+            let refused = h.handle("doc.replaceContents", json!({"layer": layer, "path": path})).unwrap_err().to_string();
+            assert!(refused.contains(reason), "{refused}");
+            assert_eq!(bounds(&mut h, layer), kept);
+        }
+        for (params, reason) in [
+            (json!({"path": "design.png"}), "layer"),
+            (json!({"layer": layer}), "path"),
+            (json!({"layer": layer, "path": "design.png", "fit": "cover"}), "fit"),
+            (json!({"layer": layer, "path": "design.png", "clipToCanvas": "yes"}), "clipToCanvas"),
+        ] {
+            let refused = h.handle("doc.replaceContents", params).unwrap_err().to_string();
+            assert!(refused.contains(reason), "{refused}");
+        }
+        // `clipToCanvas` reaches the command (an unwarped placement is drawn whole either way).
+        let clipped = h.handle("doc.replaceContents", json!({"layer": layer, "path": "design.png", "fit": "stretch", "clipToCanvas": true})).unwrap();
+        assert_eq!(clipped["layer"].as_u64(), Some(layer), "{clipped}");
+        drop(h);
+        std::fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    fn doc_save_png_compression_trades_size_for_speed() {
+        let base = std::env::temp_dir().join(format!("pc-doc-save-png-{}", std::process::id()));
+        std::fs::create_dir_all(&base).unwrap();
+        let mut seed = 1u32;
+        let noise: Vec<u8> = (0..128 * 96 * 3)
+            .map(|i| {
+                seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                // Smooth enough for deflate to find something, noisy enough to differ by level.
+                ((i / 3 % 128) as u32 + (seed >> 29)) as u8
+            })
+            .collect();
+        let img = photocraft_codecs::Image::from_u8(128, 96, photocraft_codecs::ChannelLayout::Rgb, noise).unwrap();
+        std::fs::write(base.join("in.png"), photocraft_codecs::encode(&img, photocraft_codecs::Format::Png, &Default::default()).unwrap()).unwrap();
+        let mut h = Headless::with_workspace(crate::AuthorizedWorkspace::new(Some(&base), Some(&base)).unwrap());
+        h.handle("doc.open", json!({"path": "in.png"})).unwrap();
+        let size = |h: &mut Headless, name: &str, level: &str| {
+            h.handle("doc.save", json!({"path": base.join(name).to_string_lossy(), "pngCompression": level})).unwrap();
+            std::fs::metadata(base.join(name)).unwrap().len()
+        };
+        let (none, fast, best) = (size(&mut h, "none.png", "none"), size(&mut h, "fast.png", "fast"), size(&mut h, "best.png", "best"));
+        // The level reaches the encoder: stored deflate is far larger than either compressed one
+        // (which of fast or best is smaller depends on the image).
+        assert!(none > fast && none > best, "none {none}, fast {fast}, best {best}");
+        let refused = h.handle("doc.save", json!({"path": base.join("x.png").to_string_lossy(), "pngCompression": "turbo"})).unwrap_err().to_string();
+        assert!(refused.contains("pngCompression"), "{refused}");
+        assert!(!base.join("x.png").exists());
         drop(h);
         std::fs::remove_dir_all(base).unwrap();
     }

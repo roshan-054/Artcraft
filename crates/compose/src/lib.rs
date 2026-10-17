@@ -1706,8 +1706,9 @@ fn effect_maps(layer: &Layer, rect: Rect, cx: &Ctx) -> std::sync::Arc<effects::F
 fn cached_effect_maps(layer: &Layer, region: Rect, key: u64, cx: &Ctx) -> std::sync::Arc<effects::FxMaps> {
     let slot = {
         let mut c = fx_cache().lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(s) = c.map.get(&key) {
-            s.clone()
+        if let Some(s) = c.map.get(&key).cloned() {
+            touch_effect_entry(&mut c.order, key);
+            s
         } else {
             let s: FxSlot = Default::default();
             c.map.insert(key, s.clone());
@@ -1738,7 +1739,7 @@ fn cached_effect_maps(layer: &Layer, region: Rect, key: u64, cx: &Ctx) -> std::s
             slot.get().map_or(maps, |e| e.maps.clone())
         }
     };
-    // Evict the oldest entries over budget (never the one just used).
+    // Evict the least recently used entries over budget (never the one just used).
     let mut c = fx_cache().lock().unwrap_or_else(|e| e.into_inner());
     let budget = effect_cache_budget();
     while c.bytes > budget && c.order.len() > 1 {
@@ -1752,6 +1753,15 @@ fn cached_effect_maps(layer: &Layer, region: Rect, key: u64, cx: &Ctx) -> std::s
         }
     }
     maps
+}
+
+/// Marks `key` the most recently used of `order`, so eviction (oldest first) takes the maps that
+/// renders stopped asking for, not those every render uses.
+fn touch_effect_entry(order: &mut std::collections::VecDeque<u64>, key: u64) {
+    if let Some(i) = order.iter().position(|&k| k == key) {
+        order.remove(i);
+    }
+    order.push_back(key);
 }
 
 fn texture_ctx<'a>(layer: &Layer, region: Rect, cx: &Ctx<'a>) -> effects::TextureCtx<'a> {

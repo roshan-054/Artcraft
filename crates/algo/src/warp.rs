@@ -37,13 +37,25 @@ pub fn place_source(
     t: &photocraft_geom::Affine,
     warp: Option<&photocraft_geom::warp::Warp>,
 ) -> Result<Surface, photocraft_raster::AllocationError> {
+    place_source_clipped(src, src_rect, t, warp, None)
+}
+
+/// [`place_source`], a warped placement rendered only inside `clip` (destination pixels) when
+/// given: the same pixels there, none outside.
+pub fn place_source_clipped(
+    src: &Surface,
+    src_rect: Rect,
+    t: &photocraft_geom::Affine,
+    warp: Option<&photocraft_geom::warp::Warp>,
+    clip: Option<Rect>,
+) -> Result<Surface, photocraft_raster::AllocationError> {
     let [a, b, c, d, e, f] = t.m;
     if let Some(w) = warp.filter(|w| !w.is_identity()) {
         let map = |x: f64, y: f64| {
             let (u, v) = w.map(x, y);
             (a * u + c * v + e, b * u + d * v + f)
         };
-        return Ok(warp_mesh_surface(src, src_rect, &map, Interp::Bicubic));
+        return Ok(warp_mesh_inner(src, src_rect, &map, Interp::Bicubic, true, clip));
     }
     let near = |x: f64, y: f64| (x - y).abs() < 1e-9;
     if near(a, 1.0) && near(b, 0.0) && near(c, 0.0) && near(d, 1.0) && near(e, e.round()) && near(f, f.round()) {
@@ -60,12 +72,23 @@ pub fn place_source_projective(
     h: &crate::transform::Homography,
     warp: Option<&photocraft_geom::warp::Warp>,
 ) -> Result<Surface, photocraft_raster::AllocationError> {
+    place_source_projective_clipped(src, src_rect, h, warp, None)
+}
+
+/// [`place_source_projective`], a warped placement rendered only inside `clip` when given.
+pub fn place_source_projective_clipped(
+    src: &Surface,
+    src_rect: Rect,
+    h: &crate::transform::Homography,
+    warp: Option<&photocraft_geom::warp::Warp>,
+    clip: Option<Rect>,
+) -> Result<Surface, photocraft_raster::AllocationError> {
     if let Some(w) = warp.filter(|w| !w.is_identity()) {
         let map = |x: f64, y: f64| {
             let (u, v) = w.map(x, y);
             h.apply(u, v)
         };
-        return Ok(warp_mesh_surface(src, src_rect, &map, Interp::Bicubic));
+        return Ok(warp_mesh_inner(src, src_rect, &map, Interp::Bicubic, true, clip));
     }
     crate::transform::warp_surface(src, src_rect, h, Interp::Bicubic)
 }
@@ -74,6 +97,23 @@ pub fn place_source_projective(
 /// coordinates → destination document coordinates). Output has `src`'s format with alpha
 /// added; pixels outside the warped area are transparent.
 pub fn warp_mesh_surface(src: &Surface, src_rect: Rect, f: &(dyn Fn(f64, f64) -> (f64, f64) + Sync), interp: Interp) -> Surface {
+    warp_mesh_surface_with(src, src_rect, f, interp, true)
+}
+
+/// [`warp_mesh_surface`], with the reduced-level sampling of strong shrinks switched by `mips`
+/// (off: every shrink averages subsamples of the full-resolution source, the exact reference).
+pub(crate) fn warp_mesh_surface_with(src: &Surface, src_rect: Rect, f: &(dyn Fn(f64, f64) -> (f64, f64) + Sync), interp: Interp, mips: bool) -> Surface {
+    warp_mesh_inner(src, src_rect, f, interp, mips, None)
+}
+
+/// [`warp_mesh_surface`] restricted to `clip` (destination pixels): the same pixels inside it,
+/// nothing outside. For callers that only need what lands on the canvas (a flattened export),
+/// so a placement much larger than the canvas costs only its visible part.
+pub fn warp_mesh_surface_clipped(src: &Surface, src_rect: Rect, f: &(dyn Fn(f64, f64) -> (f64, f64) + Sync), interp: Interp, clip: Rect) -> Surface {
+    warp_mesh_inner(src, src_rect, f, interp, true, Some(clip))
+}
+
+fn warp_mesh_inner(src: &Surface, src_rect: Rect, f: &(dyn Fn(f64, f64) -> (f64, f64) + Sync), interp: Interp, mips: bool, clip: Option<Rect>) -> Surface {
     if src_rect.is_empty() {
         let fmt = src.format();
         return Surface::new(PixelFormat::new(fmt.mode, fmt.sample, true));
@@ -103,7 +143,7 @@ pub fn warp_mesh_surface(src: &Surface, src_rect: Rect, f: &(dyn Fn(f64, f64) ->
             tris.push([a, a + w1 + 1, a + w1]);
         }
     }
-    warp_triangles(src, src_rect, &verts, &tris, interp)
+    warp_triangles_with(src, src_rect, &verts, &tris, interp, mips, clip)
 }
 
 /// Probe lines per axis [`mapped_lengths`] follows through the map.
@@ -148,6 +188,18 @@ fn mapped_lengths(src_rect: Rect, f: &(dyn Fn(f64, f64) -> (f64, f64) + Sync)) -
 /// interpolation of its source positions. Later triangles in `tris` draw over earlier ones (the
 /// order is the depth order). Output has `src`'s format with alpha added.
 pub fn warp_triangles(src: &Surface, src_rect: Rect, verts: &[([f64; 2], [f64; 2])], tris: &[[usize; 3]], interp: Interp) -> Surface {
+    warp_triangles_with(src, src_rect, verts, tris, interp, true, None)
+}
+
+fn warp_triangles_with(
+    src: &Surface,
+    src_rect: Rect,
+    verts: &[([f64; 2], [f64; 2])],
+    tris: &[[usize; 3]],
+    interp: Interp,
+    mips: bool,
+    clip: Option<Rect>,
+) -> Surface {
     let mut fmt = src.format();
     let converted;
     let src = if fmt.alpha {
@@ -173,6 +225,13 @@ pub fn warp_triangles(src: &Surface, src_rect: Rect, verts: &[([f64; 2], [f64; 2
         y1 = y1.max(v.0[1]);
     }
     let dst = Rect::new(x0.max(-lim).floor() as i32 - 1, y0.max(-lim).floor() as i32 - 1, x1.min(lim).ceil() as i32 + 1, y1.min(lim).ceil() as i32 + 1);
+    let dst = match clip {
+        Some(c) => dst.intersect(&c),
+        None => dst,
+    };
+    if dst.is_empty() {
+        return out;
+    }
     // Triangles: (vertex indices), binned per destination tile.
     let tiles: Vec<Rect> = dst.tiles().map(|tc| tc.rect().intersect(&dst)).filter(|r| !r.is_empty()).collect();
     let mut bins: Vec<Vec<[usize; 3]>> = vec![Vec::new(); tiles.len()];
@@ -207,7 +266,18 @@ pub fn warp_triangles(src: &Surface, src_rect: Rect, verts: &[([f64; 2], [f64; 2
     }
     let n = fmt.channels();
     let a = n - 1;
-    let work = |(t, tris): (&Rect, &Vec<[usize; 3]>)| -> Option<(Rect, Vec<f32>)> {
+    // Strong shrinks sample a box-reduced level of the source (see `Level`). A tile uses it when
+    // every triangle it holds shrinks by at least 2^(L+1) along both axes; one level serves the whole warp, the
+    // finest any tile can use, so memory stays one reduced copy of the source.
+    let tile_level: Vec<usize> = bins
+        .iter()
+        .map(|b| {
+            let s_min = b.iter().filter_map(|tri| source_step(&tri.map(|v| verts[v]))).fold(f64::INFINITY, f64::min);
+            if mips && interp != Interp::Nearest && s_min.is_finite() && s_min >= 4.0 { ((s_min / 2.0).log2().floor() as usize).min(MAX_LEVEL) } else { 0 }
+        })
+        .collect();
+    let level = tile_level.iter().copied().filter(|&l| l > 0).min().and_then(|l| level_for(src, src_rect, l, n));
+    let work = |((t, tris), &lvl): ((&Rect, &Vec<[usize; 3]>), &usize)| -> Option<(Rect, Vec<f32>)> {
         if tris.is_empty() {
             return None;
         }
@@ -264,6 +334,9 @@ pub fn warp_triangles(src: &Surface, src_rect: Rect, verts: &[([f64; 2], [f64; 2
                     owner[o] = k as u32;
                 }
             }
+        }
+        if let Some(lv) = level.as_ref().filter(|lv| lvl >= lv.level) {
+            return lv.shade(*t, &uv, &owner, tris, verts, n);
         }
         // Source footprint of the covered pixels, including the spread of their subsamples.
         let (mut fx0, mut fy0, mut fx1, mut fy1) = (f64::MAX, f64::MAX, f64::MIN, f64::MIN);
@@ -383,15 +456,255 @@ pub fn warp_triangles(src: &Surface, src_rect: Rect, verts: &[([f64; 2], [f64; 2
     #[cfg(not(target_arch = "wasm32"))]
     let done: Vec<(Rect, Vec<f32>)> = {
         use rayon::prelude::*;
-        tiles.par_iter().zip(bins.par_iter()).filter_map(work).collect()
+        tiles.par_iter().zip(bins.par_iter()).zip(tile_level.par_iter()).filter_map(work).collect()
     };
     #[cfg(target_arch = "wasm32")]
-    let done: Vec<(Rect, Vec<f32>)> = tiles.iter().zip(bins.iter()).filter_map(work).collect();
+    let done: Vec<(Rect, Vec<f32>)> = tiles.iter().zip(bins.iter()).zip(tile_level.iter()).filter_map(work).collect();
     for (r, v) in done {
         out.write_region(r, &v);
     }
     out.prune();
     out
+}
+
+/// Coarsest reduced level a strong shrink samples (64× smaller per axis).
+const MAX_LEVEL: usize = 6;
+
+/// A reduced level kept while a [`reuse_levels`] scope is open, with what it was built from.
+struct SharedLevel {
+    /// Every tile of the source, held: while cached they can be neither freed nor changed in
+    /// place, so equal tile pointers mean equal pixels.
+    tiles: Vec<(photocraft_geom::TileCoord, std::sync::Arc<photocraft_raster::Tile>)>,
+    default: Vec<u8>,
+    format: PixelFormat,
+    rect: Rect,
+    n: usize,
+    level: std::sync::Arc<Level>,
+}
+
+thread_local! {
+    /// The levels of the open [`reuse_levels`] scope on this thread (`None`: no scope).
+    static LEVELS: std::cell::RefCell<Option<Vec<SharedLevel>>> = const { std::cell::RefCell::new(None) };
+}
+
+thread_local! {
+    /// Reduced levels built on this thread.
+    static LEVEL_BUILDS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// How many reduced levels warps on this thread have built (a diagnostic: instances sharing
+/// one inside a [`reuse_levels`] scope count once).
+pub fn reduced_levels_built() -> usize {
+    LEVEL_BUILDS.with(std::cell::Cell::get)
+}
+
+/// Open while alive: see [`reuse_levels`]. Bound to the thread that opened it.
+pub struct LevelScope {
+    owner: bool,
+    _thread: std::marker::PhantomData<*const ()>,
+}
+
+impl Drop for LevelScope {
+    fn drop(&mut self) {
+        if self.owner {
+            LEVELS.with(|l| *l.borrow_mut() = None);
+        }
+    }
+}
+
+/// While the returned guard lives, warps on this thread reuse the reduced level they built for
+/// the same source pixels (the instances of one smart object all warp its contents) instead of
+/// reducing the source again. Dropping it frees them. Scopes nest; the outermost one owns them.
+pub fn reuse_levels() -> LevelScope {
+    LEVELS.with(|l| {
+        let mut l = l.borrow_mut();
+        let owner = l.is_none();
+        if owner {
+            *l = Some(Vec::new());
+        }
+        LevelScope { owner, _thread: std::marker::PhantomData }
+    })
+}
+
+/// [`Level::build`], served from the open [`reuse_levels`] scope when one has it.
+fn level_for(src: &Surface, r: Rect, level: usize, n: usize) -> Option<std::sync::Arc<Level>> {
+    let same = |e: &SharedLevel| {
+        e.rect == r
+            && e.level.level == level
+            && e.n == n
+            && e.format == src.format()
+            && e.default == src.default_bytes()
+            && e.tiles.len() == src.tiles().count()
+            && e.tiles.iter().zip(src.tiles()).all(|((ca, ta), (cb, tb))| ca == cb && std::sync::Arc::ptr_eq(ta, tb))
+    };
+    if let Some(hit) = LEVELS.with(|l| l.borrow().as_ref().and_then(|v| v.iter().find(|e| same(e)).map(|e| e.level.clone()))) {
+        return Some(hit);
+    }
+    let built = std::sync::Arc::new(Level::build(src, r, level, n)?);
+    LEVELS.with(|l| {
+        if let Some(v) = l.borrow_mut().as_mut() {
+            let tiles = src.tiles().map(|(c, t)| (*c, t.clone())).collect();
+            v.push(SharedLevel { tiles, default: src.default_bytes().to_vec(), format: src.format(), rect: r, n, level: built.clone() });
+        }
+    });
+    Some(built)
+}
+
+/// The inverse map's Jacobian over one triangle `[(destination, source); 3]`: the source step
+/// per destination pixel along x and along y, or `None` for a degenerate triangle. The same
+/// arithmetic as the rasterizer's, so both agree on a triangle's scale.
+fn jacobian(t: &[([f64; 2], [f64; 2]); 3]) -> Option<([f64; 2], [f64; 2])> {
+    let [(p0, s0), (p1, s1), (p2, s2)] = *t;
+    let det = (p1[0] - p0[0]) * (p2[1] - p0[1]) - (p2[0] - p0[0]) * (p1[1] - p0[1]);
+    if det.abs() < 1e-12 {
+        return None;
+    }
+    let (d1, d2) = ([s1[0] - s0[0], s1[1] - s0[1]], [s2[0] - s0[0], s2[1] - s0[1]]);
+    let (l1x, l1y, l2x, l2y) = ((p2[1] - p0[1]) / det, (p0[0] - p2[0]) / det, (p0[1] - p1[1]) / det, (p1[0] - p0[0]) / det);
+    Some(([l1x * d1[0] + l2x * d2[0], l1x * d1[1] + l2x * d2[1]], [l1y * d1[0] + l2y * d2[0], l1y * d1[1] + l2y * d2[1]]))
+}
+
+/// How many source pixels one destination pixel spans along its shorter axis. A reduced level
+/// averages 2^L pixels along both source axes, so it must fit the short one: picked from the long
+/// axis, a 16 × 1 shrink would also average ~8 rows where one is right.
+fn source_step(t: &[([f64; 2], [f64; 2]); 3]) -> Option<f64> {
+    jacobian(t).map(|(jx, jy)| jx[0].hypot(jx[1]).min(jy[0].hypot(jy[1]))).filter(|s| s.is_finite())
+}
+
+/// The source reduced 2^`level` times per axis by a box filter, premultiplied: pixel `(i, j)`
+/// averages the `2^level`-square block of the source rectangle at `(x0, y0) + 2^level·(i, j)`,
+/// pixels past the rectangle counting as transparent (as the full-resolution path reads them).
+/// A shrink by `s` samples it with steps of `s / 2^level` (2 to 4 subsamples per axis instead of
+/// up to `MAX_SS`) and reads a 4^level smaller footprint, which is what makes warping a large
+/// smart object into a small placement cheap.
+struct Level {
+    level: usize,
+    scale: f64,
+    x0: f64,
+    y0: f64,
+    w: usize,
+    h: usize,
+    px: Vec<f32>,
+}
+
+impl Level {
+    /// `None` when the reduced copy would not fit the memory bound (the exact path is used).
+    fn build(src: &Surface, r: Rect, level: usize, n: usize) -> Option<Level> {
+        LEVEL_BUILDS.with(|b| b.set(b.get() + 1));
+        let k = 1usize << level;
+        let (sw, sh) = (r.width() as usize, r.height() as usize);
+        let (w, h) = (sw.div_ceil(k), sh.div_ceil(k));
+        let len = w.checked_mul(h)?.checked_mul(n)?;
+        if len > 1 << 30 || sw == 0 {
+            return None;
+        }
+        let inv = 1.0 / (k * k) as f32;
+        let row = |j: usize| -> Vec<f32> {
+            let y0 = r.y0 + (j * k) as i32;
+            let strip = src.read_region(Rect::new(r.x0, y0, r.x1, (y0 + k as i32).min(r.y1)));
+            let mut out = vec![0.0f32; w * n];
+            for line in strip.chunks_exact(sw * n) {
+                for (x, p) in line.chunks_exact(n).enumerate() {
+                    let al = p[n - 1];
+                    let o = (x / k) * n;
+                    for c in 0..n - 1 {
+                        out[o + c] += p[c] * al;
+                    }
+                    out[o + n - 1] += al;
+                }
+            }
+            for v in &mut out {
+                *v *= inv;
+            }
+            out
+        };
+        #[cfg(not(target_arch = "wasm32"))]
+        let rows: Vec<Vec<f32>> = {
+            use rayon::prelude::*;
+            (0..h).into_par_iter().map(row).collect()
+        };
+        #[cfg(target_arch = "wasm32")]
+        let rows: Vec<Vec<f32>> = (0..h).map(row).collect();
+        let px = rows.concat();
+        (px.len() == len).then_some(Level { level, scale: k as f64, x0: f64::from(r.x0), y0: f64::from(r.y0), w, h, px })
+    }
+
+    /// One premultiplied bilinear sample at level position `(u, v)` (pixel centres at integers).
+    fn bilinear(&self, u: f64, v: f64, n: usize, acc: &mut [f64; 8]) {
+        acc[..n].fill(0.0);
+        let (ix, iy) = (u.floor(), v.floor());
+        let (fx, fy) = (u - ix, v - iy);
+        for (dy, wy) in [(0.0, 1.0 - fy), (1.0, fy)] {
+            for (dx, wx) in [(0.0, 1.0 - fx), (1.0, fx)] {
+                let (x, y) = (ix + dx, iy + dy);
+                if x < 0.0 || y < 0.0 || x >= self.w as f64 || y >= self.h as f64 {
+                    continue;
+                }
+                let o = (y as usize * self.w + x as usize) * n;
+                if let Some(p) = self.px.get(o..o + n) {
+                    for (s, &c) in acc.iter_mut().zip(p) {
+                        *s += f64::from(c) * wx * wy;
+                    }
+                }
+            }
+        }
+    }
+
+    /// Shades tile `t` from this level: each covered pixel averages subsamples spread over its
+    /// footprint, `uv`/`owner` as the rasterizer left them. Same output layout as the exact path.
+    fn shade(&self, t: Rect, uv: &[[f64; 2]], owner: &[u32], tris: &[[usize; 3]], verts: &[([f64; 2], [f64; 2])], n: usize) -> Option<(Rect, Vec<f32>)> {
+        let a = n - 1;
+        let k = self.scale;
+        let cap = |j: [f64; 2]| {
+            let l = j[0].hypot(j[1]);
+            if l > MAX_SS { [j[0] * MAX_SS / l, j[1] * MAX_SS / l] } else { j }
+        };
+        let count = |j: [f64; 2]| j[0].hypot(j[1]).round().clamp(1.0, MAX_SS) as usize;
+        // Per triangle: its steps on this level and subsample counts.
+        let steps: Vec<([f64; 2], [f64; 2], usize, usize)> = tris
+            .iter()
+            .map(|tri| match jacobian(&tri.map(|v| verts[v])) {
+                Some((jx, jy)) => {
+                    let (jx, jy) = (cap([jx[0] / k, jx[1] / k]), cap([jy[0] / k, jy[1] / k]));
+                    (jx, jy, count(jx), count(jy))
+                }
+                None => ([0.0; 2], [0.0; 2], 1, 1),
+            })
+            .collect();
+        let mut outp = vec![0.0f32; t.width() as usize * t.height() as usize * n];
+        let mut any = false;
+        let (mut acc, mut one) = ([0.0f64; 8], [0.0f64; 8]);
+        for (o, (q, &kk)) in uv.iter().zip(owner).enumerate() {
+            if q[0].is_nan() {
+                continue;
+            }
+            let Some(&(jx, jy, nx, ny)) = steps.get(kk as usize) else { continue };
+            let (u, v) = ((q[0] - self.x0) / k, (q[1] - self.y0) / k);
+            acc[..n].fill(0.0);
+            for sy in 0..ny {
+                let tt = (sy as f64 + 0.5) / ny as f64 - 0.5;
+                for sx in 0..nx {
+                    let ss = (sx as f64 + 0.5) / nx as f64 - 0.5;
+                    self.bilinear(u + ss * jx[0] + tt * jy[0] - 0.5, v + ss * jx[1] + tt * jy[1] - 0.5, n, &mut one);
+                    for (c, x) in acc.iter_mut().zip(&one).take(n) {
+                        *c += x;
+                    }
+                }
+            }
+            let inv = 1.0 / (nx * ny) as f64;
+            let al = (acc[a] * inv).clamp(0.0, 1.0);
+            if al <= 1e-6 {
+                continue;
+            }
+            any = true;
+            let b = o * n;
+            for c in 0..a {
+                outp[b + c] = (acc[c] * inv / al).clamp(0.0, 1.0) as f32;
+            }
+            outp[b + a] = al as f32;
+        }
+        any.then_some((t, outp))
+    }
 }
 
 /// [`warp_mesh_surface`] for single-channel surfaces whose outside reads as their default value
@@ -516,6 +829,158 @@ mod tests {
         assert!(e[3] > 0.2, "a point near the top-left corner lands at its mapped position: {e:?}");
         let c = arc.content_bounds();
         assert!(c.y0 < r.y0 - 2 && c.x0 < r.x0 && c.x1 > r.x1, "the top rises and spreads past the box: {c:?}");
+    }
+
+    /// Smooth bands plus per-pixel noise (deterministic), opaque.
+    fn textured(w: i32, h: i32, seed: u32) -> Surface {
+        let mut src = Surface::new(PixelFormat::new(ColorMode::Rgb, SampleType::F32, true));
+        let mut z = seed;
+        let mut px = Vec::with_capacity((w * h * 4) as usize);
+        for y in 0..h {
+            for x in 0..w {
+                z = z.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                let n = f64::from(z >> 8) / f64::from(1u32 << 24) - 0.5;
+                let v = 0.5 + 0.3 * (f64::from(x) * 0.021).sin() * (f64::from(y) * 0.017).cos() + 0.15 * n;
+                px.extend([v as f32, (1.0 - v) as f32, (f64::from(x) / f64::from(w)) as f32, 1.0]);
+            }
+        }
+        src.write_region(Rect::new(0, 0, w, h), &px);
+        src
+    }
+
+    fn mean_abs_diff(a: &Surface, b: &Surface) -> f64 {
+        let r = a.content_bounds().union(&b.content_bounds());
+        let (pa, pb) = (a.read_region(r), b.read_region(r));
+        pa.iter().zip(&pb).map(|(x, y)| f64::from((x - y).abs())).sum::<f64>() / pa.len().max(1) as f64
+    }
+
+    #[test]
+    fn a_reuse_scope_builds_a_reduced_level_once_per_source() {
+        // The instances of one smart object warp the same source: inside a scope the reduced
+        // level is built once, and every warp gives the pixels it gives alone.
+        let src = textured(1024, 512, 5);
+        let r = Rect::new(0, 0, 1024, 512);
+        let f = |x: f64, y: f64| (x / 9.0 + 0.001 * y, y / 9.0);
+        let g = |x: f64, y: f64| (x / 8.5, y / 9.5 + 0.002 * x);
+        let alone = [warp_mesh_surface(&src, r, &f, Interp::Bicubic), warp_mesh_surface(&src, r, &g, Interp::Bicubic)];
+        let builds = reduced_levels_built;
+        let before = builds();
+        let shared = {
+            let _scope = reuse_levels();
+            [warp_mesh_surface(&src, r, &f, Interp::Bicubic), warp_mesh_surface(&src, r, &g, Interp::Bicubic)]
+        };
+        assert_eq!(builds() - before, 1, "one level for both warps");
+        for (a, b) in alone.iter().zip(&shared) {
+            assert_eq!(a.content_bounds(), b.content_bounds());
+            assert_eq!(a.read_region(a.content_bounds()), b.read_region(b.content_bounds()));
+        }
+        // Outside a scope every warp builds its own.
+        let before = builds();
+        let _ = warp_mesh_surface(&src, r, &f, Interp::Bicubic);
+        let _ = warp_mesh_surface(&src, r, &f, Interp::Bicubic);
+        assert_eq!(builds() - before, 2);
+    }
+
+    #[test]
+    fn a_reuse_scope_never_serves_the_level_of_other_pixels() {
+        // A copy sharing all but one tile with the source gets its own level.
+        let src = textured(1024, 512, 5);
+        let mut other = src.clone();
+        other.fill_rect(Rect::new(0, 0, 64, 64), &[1.0, 0.0, 0.0, 1.0]);
+        let r = Rect::new(0, 0, 1024, 512);
+        let f = |x: f64, y: f64| (x / 9.0, y / 9.0);
+        let expect = warp_mesh_surface(&other, r, &f, Interp::Bicubic);
+        let _scope = reuse_levels();
+        let _ = warp_mesh_surface(&src, r, &f, Interp::Bicubic);
+        let got = warp_mesh_surface(&other, r, &f, Interp::Bicubic);
+        assert_eq!(got.read_region(got.content_bounds()), expect.read_region(expect.content_bounds()));
+    }
+
+    #[test]
+    fn mips_leave_identity_affine_and_mild_shrinks_untouched() {
+        let r = Rect::new(0, 0, 300, 200);
+        for depth in [SampleType::U8, SampleType::U16, SampleType::F32] {
+            let src = textured(300, 200, 7).convert(PixelFormat::new(ColorMode::Rgb, depth, true));
+            // Up to a step of 4 source px (k · |(1, 0.25)| < 4 here) the exact path runs unchanged.
+            for k in [1.0, 0.8, 1.5, 2.0, 3.8] {
+                let f = move |x: f64, y: f64| (x / k + 0.25 * y / k, y / k);
+                let mipped = warp_mesh_surface(&src, r, &f, Interp::Bicubic);
+                let exact = warp_mesh_surface_with(&src, r, &f, Interp::Bicubic, false);
+                assert_eq!(mipped.content_bounds(), exact.content_bounds(), "{depth:?}, k = {k}");
+                assert_eq!(mipped.read_region(mipped.content_bounds()), exact.read_region(exact.content_bounds()), "{depth:?}, k = {k}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_mipped_shrink_stays_close_to_the_exact_area_average() {
+        let src = textured(2048, 1024, 3);
+        let r = Rect::new(0, 0, 2048, 1024);
+        for (kx, ky) in [(7.3, 6.1), (16.0, 16.0), (30.0, 11.0)] {
+            // A shear and a bend too, so triangles differ in scale across a tile.
+            let f = move |x: f64, y: f64| (x / kx + 0.002 * y, y / ky + 6.0 * (x / 2048.0 * std::f64::consts::PI).sin());
+            let mipped = warp_mesh_surface(&src, r, &f, Interp::Bicubic);
+            let exact = warp_mesh_surface_with(&src, r, &f, Interp::Bicubic, false);
+            let d = mean_abs_diff(&mipped, &exact) * 255.0;
+            assert!(d < 1.0, "{kx}x{ky}: mean diff {d:.3}/255");
+        }
+    }
+
+    #[test]
+    fn a_mipped_shrink_of_a_fine_checker_is_flat_grey() {
+        let mut src = Surface::new(PixelFormat::new(ColorMode::Rgb, SampleType::U8, true));
+        let (w, h) = (1024, 1024);
+        let px: Vec<f32> = (0..h).flat_map(|y| (0..w).map(move |x| if (x + y) % 2 == 0 { 1.0 } else { 0.0 })).flat_map(|v| [v, v, v, 1.0]).collect();
+        src.write_region(Rect::new(0, 0, w, h), &px);
+        let f = |x: f64, y: f64| (x / 16.0, y / 16.0);
+        let out = warp_mesh_surface(&src, Rect::new(0, 0, w, h), &f, Interp::Bicubic);
+        let o = out.read_region(Rect::new(4, 4, 60, 60));
+        let worst = o.as_chunks::<4>().0.iter().map(|p| (p[0] - 0.5).abs()).fold(0.0f32, f32::max);
+        assert!(worst < 0.02, "worst deviation from grey {worst}");
+    }
+
+    #[test]
+    fn a_clipped_warp_equals_the_full_warp_inside_the_clip_and_is_empty_outside() {
+        let r = Rect::new(0, 0, 600, 400);
+        // Placed larger than the clip and bent, so it spills past it on every side.
+        let f = |x: f64, y: f64| (x * 1.7 - 300.0 + 0.1 * y, y * 1.5 - 120.0 + 40.0 * (x / 600.0 * std::f64::consts::PI).sin());
+        let clip = Rect::new(0, 0, 700, 450);
+        for depth in [SampleType::U8, SampleType::U16, SampleType::F32] {
+            let src = textured(600, 400, 5).convert(PixelFormat::new(ColorMode::Rgb, depth, true));
+            let full = warp_mesh_surface_with(&src, r, &f, Interp::Bicubic, true);
+            let clipped = warp_mesh_surface_clipped(&src, r, &f, Interp::Bicubic, clip);
+            assert!(clip.contains_rect(&clipped.content_bounds()), "{depth:?}: {:?}", clipped.content_bounds());
+            assert!(!full.content_bounds().intersect(&clip).is_empty() && !clip.contains_rect(&full.content_bounds()), "{depth:?}");
+            let inside = full.content_bounds().intersect(&clip);
+            assert_eq!(clipped.read_region(inside), full.read_region(inside), "{depth:?}");
+        }
+    }
+
+    #[test]
+    fn an_anisotropic_shrink_is_not_blurred_along_its_short_axis() {
+        // 16× narrower but full height: the exact path averages 16 columns and 1 row; a level
+        // picked from the long axis would also average ~8 rows and smear horizontal detail.
+        let src = textured(2048, 512, 9);
+        let r = Rect::new(0, 0, 2048, 512);
+        let f = |x: f64, y: f64| (x / 16.0, y);
+        let mipped = warp_mesh_surface(&src, r, &f, Interp::Bicubic);
+        let exact = warp_mesh_surface_with(&src, r, &f, Interp::Bicubic, false);
+        let d = mean_abs_diff(&mipped, &exact) * 255.0;
+        assert!(d < 1.0, "mean diff {d:.3}/255");
+    }
+
+    /// `cargo test -p photocraft-algo --release mip_bench -- --ignored --nocapture`
+    #[test]
+    #[ignore = "benchmark"]
+    fn mip_bench() {
+        let src = textured(8192, 4096, 11);
+        let r = Rect::new(0, 0, 8192, 4096);
+        let f = |x: f64, y: f64| (x / 8.0 + 0.01 * y, y / 8.0);
+        for (name, mips) in [("exact", false), ("mipped", true)] {
+            let t = std::time::Instant::now();
+            let out = warp_mesh_surface_with(&src, r, &f, Interp::Bicubic, mips);
+            println!("{name}: {:.0} ms ({:?})", t.elapsed().as_secs_f64() * 1000.0, out.content_bounds());
+        }
     }
 
     #[test]
