@@ -38,9 +38,16 @@ pub fn parse(s: &str) -> Option<KeyboardShortcut> {
         ";" => Some(Key::Semicolon),
         "'" => Some(Key::Quote),
         "]" => Some(Key::CloseBracket),
-        name => Key::from_name(name),
+        name => key_from_name(name),
     }?;
     Some(KeyboardShortcut::new(mods, key))
+}
+
+/// [`Key::from_name`], ignoring case as a fallback: older builds saved `PageUp` as `Pageup`
+/// (and `ArrowLeft` as `Arrowleft`), which egui doesn't read, so those shortcuts never fired
+/// (#6827).
+pub fn key_from_name(name: &str) -> Option<Key> {
+    Key::from_name(name).or_else(|| Key::ALL.iter().copied().find(|k| k.name().eq_ignore_ascii_case(name)))
 }
 
 /// Human-readable form for menus, tooltips and inline hints (`Cmd+Shift+N` → `⌘⇧N` on
@@ -842,6 +849,21 @@ mod tests {
         assert_eq!(parse("Cmd+=").unwrap().logical_key, Key::Equals);
         assert_eq!(parse("F7").unwrap().logical_key, Key::F7);
         assert!(parse("Cmd+Nonsense").is_none());
+    }
+
+    #[test]
+    fn page_and_arrow_keys_recorded_in_the_editor_fire() {
+        // #6827: Shift+Page Up recorded in Edit › Keyboard Shortcuts was saved as `Shift+Pageup`,
+        // which never parsed, so the command (Flip Horizontal) never ran.
+        for (key, mods) in [(Key::PageUp, Modifiers::SHIFT), (Key::PageDown, Modifiers::COMMAND | Modifiers::SHIFT), (Key::ArrowLeft, Modifiers::ALT)] {
+            let text = crate::prefs_ui::shortcut_text(key, mods).unwrap();
+            let sc = parse(&text).unwrap_or_else(|| panic!("{text} must parse"));
+            assert_eq!(sc.logical_key, key, "{text}");
+            assert!(key_matches(&sc, key, mods), "{text}");
+        }
+        // Bindings saved by older builds still work.
+        assert_eq!(parse("Shift+Pageup").unwrap().logical_key, Key::PageUp);
+        assert_eq!(parse("Ctrl+Alt+Pagedown").unwrap().logical_key, Key::PageDown);
     }
 
     #[test]

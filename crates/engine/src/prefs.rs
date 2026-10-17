@@ -1462,7 +1462,39 @@ pub fn normalize_shortcut(s: &str) -> Option<String> {
     Some(s)
 }
 
+/// Key names spelled with inner capitals (egui's `Key::name`), which Title case would break:
+/// `PageUp` became `Pageup`, a name no key has, so a shortcut recorded on Page Up/Down or an
+/// arrow key never fired (#6827).
+const CAMEL_KEYS: [&str; 18] = [
+    "PageUp",
+    "PageDown",
+    "ArrowUp",
+    "ArrowDown",
+    "ArrowLeft",
+    "ArrowRight",
+    "OpenBracket",
+    "CloseBracket",
+    "OpenCurlyBracket",
+    "CloseCurlyBracket",
+    "NumpadEnter",
+    "NumpadComma",
+    "NumpadSubtract",
+    "NumpadDecimal",
+    "NumpadAdd",
+    "NumpadEqual",
+    "NumpadDivide",
+    "BrowserBack",
+];
+
 fn capitalize(s: &str) -> String {
+    if let Some(k) = CAMEL_KEYS.iter().find(|k| k.eq_ignore_ascii_case(s)) {
+        return (*k).to_string();
+    }
+    match s.to_ascii_lowercase().as_str() {
+        "pgup" => return "PageUp".into(),
+        "pgdn" | "pgdown" => return "PageDown".into(),
+        _ => {}
+    }
     let mut c = s.chars();
     match c.next() {
         Some(f) if f.is_ascii_alphabetic() => {

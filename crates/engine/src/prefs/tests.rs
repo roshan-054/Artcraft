@@ -343,6 +343,13 @@ fn shortcuts_normalise_and_detect_conflicts() {
     assert_eq!(normalize_shortcut("Cmd++").as_deref(), Some("Cmd++"));
     assert_eq!(normalize_shortcut("Cmd+Shift"), None);
     assert_eq!(normalize_shortcut("Cmd+A+B"), None);
+    // #6827: named keys with inner capitals keep egui's spelling, so the binding still parses.
+    assert_eq!(normalize_shortcut("Shift+Cmd+PageUp").as_deref(), Some("Cmd+Shift+PageUp"));
+    assert_eq!(normalize_shortcut("alt+pagedown").as_deref(), Some("Alt+PageDown"));
+    assert_eq!(normalize_shortcut("Ctrl+Pageup").as_deref(), Some("Ctrl+PageUp"));
+    assert_eq!(normalize_shortcut("Shift+PgDn").as_deref(), Some("Shift+PageDown"));
+    assert_eq!(normalize_shortcut("Cmd+ArrowLeft").as_deref(), Some("Cmd+ArrowLeft"));
+    assert_eq!(normalize_shortcut("home").as_deref(), Some("Home"));
     let c = conflicts([("a", "Cmd+J"), ("b", "cmd+j"), ("c", "Cmd+K")]);
     assert_eq!(c, vec![("Cmd+J".to_string(), vec!["a".to_string(), "b".to_string()])]);
 }

@@ -356,7 +356,7 @@ impl Chord {
             "/" => Key::Slash,
             "," => Key::Comma,
             "." => Key::Period,
-            k => Key::from_name(k)?,
+            k => crate::shortcuts::key_from_name(k)?,
         };
         let modifiers = Modifiers { alt: self.alt, ctrl: self.ctrl, shift: self.shift, mac_cmd: self.cmd, command: self.cmd };
         Some(egui::Event::Key { key, physical_key: Some(key), pressed, repeat: false, modifiers })
