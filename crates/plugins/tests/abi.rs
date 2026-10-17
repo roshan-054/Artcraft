@@ -317,3 +317,30 @@ fn folder_loading_skips_bad_files() {
     assert!(photocraft_plugins::registry::load_file(&dir, Limits::default()).is_err(), "a directory is not a module");
     std::fs::remove_dir_all(&dir).ok();
 }
+
+#[test]
+fn example_invert_rejects_mismatched_buffer_length() {
+    use wasmi::{Engine, Linker, Module, Store};
+
+    let engine = Engine::default();
+    let module = Module::new(&engine, INVERT).unwrap();
+    let mut store = Store::new(&engine, ());
+    let linker = Linker::<()>::new(&engine);
+
+    let instance = linker.instantiate_and_start(&mut store, &module).unwrap();
+
+    let alloc = instance.get_typed_func::<i32, i32>(&store, "pc_alloc").unwrap();
+
+    let filter = instance.get_typed_func::<(i32, i32, i32, i32, i32, i32, i32, i32), i32>(&store, "pc_filter").unwrap();
+
+    // A 2x2 RGBA image requires 16 f32 samples = 64 bytes.
+    let ptr = alloc.call(&mut store, 80).unwrap();
+
+    // The host provides valid allocated memory, but the
+    // declared byte length disagrees with image dimensions.
+    for (name, len, expected) in [("valid", 64, 0), ("too short", 48, 1), ("too long", 80, 1), ("unaligned", 63, 1)] {
+        let result = filter.call(&mut store, (ptr, len, 2, 2, 4, 0, 0, 0)).unwrap();
+
+        assert_eq!(result, expected, "{name}");
+    }
+}
