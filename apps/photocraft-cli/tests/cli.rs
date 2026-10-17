@@ -106,6 +106,31 @@ fn unknown_flags_are_usage_errors() {
 }
 
 #[test]
+fn missing_option_values_fail_before_writing_outputs() {
+    let d = tmp("missing-option-values");
+    let output = d.join("out");
+    for args in [
+        vec!["commands", "--filter", "--json"],
+        vec!["convert", "in.png", "out.png", "--quality", "--format=png"],
+        vec!["run", "--new", "--cmd", "document.inspect"],
+        vec!["batch", "--actions", "--in", "missing", "--out"],
+    ] {
+        let o = bin().current_dir(&d).args(&args).arg(&output).output().unwrap();
+        let err = String::from_utf8_lossy(&o.stderr);
+        assert_eq!(o.status.code(), Some(2), "{args:?}: {err}");
+        assert!(err.contains("needs a value"), "{args:?}: {err}");
+        assert!(o.stdout.is_empty());
+        assert_eq!(std::fs::read_dir(&d).unwrap().count(), 0, "invalid arguments wrote nothing");
+    }
+    for help in ["--help", "-h"] {
+        let (out, err) = ok(bin().current_dir(&d).args(["batch", "--actions", help]));
+        assert!(out.contains("USAGE"));
+        assert!(err.is_empty());
+    }
+    std::fs::remove_dir_all(d).unwrap();
+}
+
+#[test]
 fn convert_png_pcraft_png_is_lossless() {
     let d = tmp("convert");
     let (a, b, c) = (d.join("a.png"), d.join("b.pcraft"), d.join("c.png"));

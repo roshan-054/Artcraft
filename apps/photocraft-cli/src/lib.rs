@@ -52,6 +52,7 @@ USAGE:
 
   photocraft-cli <subcommand> --help (or -h) prints this text. A flag the subcommand doesn't take is
   an error.
+  Use --option=--value for a value that starts with --, or --option=-h for a literal -h.
 ";
 
 struct Args {
@@ -101,13 +102,14 @@ const SUBCOMMANDS: &[Subcommand] = &[
 
 /// The subcommand's arguments, or `None` when they ask for help (`--help` or `-h`).
 fn parse(sub: &Subcommand, args: &[String]) -> Result<Option<Args>, String> {
+    // Help must work even after an option whose value is missing, before any subcommand runs.
+    if args.iter().any(|s| s == "--help" || s == "-h") {
+        return Ok(None);
+    }
     let mut a = Args { positional: Vec::new(), flags: Vec::new() };
     let unknown = |flag: &str| format!("unknown flag {flag} for {}", sub.name);
     let mut i = 0;
     while let Some(s) = args.get(i) {
-        if s == "--help" || s == "-h" {
-            return Ok(None);
-        }
         if let Some((k, v)) = s.split_once('=').filter(|(k, _)| k.starts_with("--")) {
             if sub.bare.contains(&k) {
                 return Err(format!("{k} takes no value"));
@@ -117,7 +119,7 @@ fn parse(sub: &Subcommand, args: &[String]) -> Result<Option<Args>, String> {
             }
             a.flags.push((k.to_owned(), Some(v.to_owned())));
         } else if sub.values.contains(&s.as_str()) {
-            let v = args.get(i + 1).ok_or_else(|| format!("{s} needs a value"))?;
+            let v = args.get(i + 1).filter(|v| !v.starts_with("--")).ok_or_else(|| format!("{s} needs a value"))?;
             a.flags.push((s.clone(), Some(v.clone())));
             i += 1;
         } else if sub.bare.contains(&s.as_str()) {
@@ -750,5 +752,59 @@ mod batch_action_set_tests {
             assert!(!dir.join(action).join("a.png").exists(), "a file whose called action failed is not saved");
         }
         let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
+mod argument_tests {
+    use super::*;
+
+    #[test]
+    fn value_options_do_not_consume_following_flags() {
+        for sub in SUBCOMMANDS {
+            for flag in sub.values {
+                for next in sub.values.iter().chain(sub.bare).copied().chain(["--unknown", "--unknown=value"]) {
+                    let args = [flag.to_string(), next.to_string()];
+                    match parse(sub, &args) {
+                        Err(error) => assert_eq!(error, format!("{flag} needs a value")),
+                        Ok(_) => panic!("{} {flag} {next} accepted a flag as a value", sub.name),
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn help_after_a_value_option_returns_before_work() {
+        for sub in SUBCOMMANDS {
+            for flag in sub.values {
+                for help in ["--help", "-h"] {
+                    let args = [sub.name.to_string(), flag.to_string(), help.to_string()];
+                    let (mut out, mut err) = (Vec::new(), Vec::new());
+                    assert_eq!(run(&args, &mut out, &mut err), 0, "{} {flag} {help}: {}", sub.name, String::from_utf8_lossy(&err));
+                    assert!(String::from_utf8_lossy(&out).contains("USAGE"));
+                    assert!(err.is_empty());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn option_like_values_can_be_given_with_equals() {
+        for sub in SUBCOMMANDS {
+            for flag in sub.values {
+                for value in ["--literal", "--help", "-h"] {
+                    let args = [format!("{flag}={value}")];
+                    let parsed = parse(sub, &args).unwrap().unwrap();
+                    assert_eq!(parsed.get(flag), Some(value));
+                }
+                // Negative numeric values and paths beginning with a single dash remain values.
+                for value in ["-1", "-image.png"] {
+                    let args = [flag.to_string(), value.to_string()];
+                    let parsed = parse(sub, &args).unwrap().unwrap();
+                    assert_eq!(parsed.get(flag), Some(value));
+                }
+            }
+        }
     }
 }
