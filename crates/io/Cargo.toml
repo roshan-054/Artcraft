@@ -14,6 +14,12 @@ workspace = true
 corpus = []
 # HEIC/HEIF decode (forwarded to photocraft-codecs; see its `heif` feature).
 heif = ["photocraft-codecs/heif"]
+# Verify C2PA Content Credentials on open with the c2pa SDK (#1050). Without it, a file that
+# carries a manifest is reported as present but unverifiable.
+content-credentials = ["photocraft-provenance/c2pa"]
+# The tests that open files signed at test time: `cargo test -p photocraft-io --features
+# content-credentials-testgen --test content_credentials`.
+content-credentials-testgen = ["content-credentials", "photocraft-provenance/testgen"]
 
 [dependencies]
 photocraft-geom = { workspace = true }
@@ -25,6 +31,7 @@ photocraft-compose = { workspace = true }
 photocraft-algo = { workspace = true }
 photocraft-psd = { workspace = true }
 photocraft-codecs = { workspace = true }
+photocraft-provenance = { workspace = true }
 photocraft-raw = { workspace = true }
 photocraft-affinity = { workspace = true }
 photocraft-text = { workspace = true }

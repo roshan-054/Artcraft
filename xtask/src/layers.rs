@@ -42,6 +42,8 @@ pub const TABLE: &[(&str, Class)] = &[
     // Optional HEIF/HEIC decoder (heic-rs), used only by `codecs` behind its `heif` feature.
     ("heif", Class::Standalone),
     ("raw", Class::Standalone),
+    // C2PA Content Credentials reader (the c2pa SDK behind its `c2pa` feature), used by `doc` and `io`.
+    ("provenance", Class::Standalone),
     ("affinity", Class::Standalone),
     ("adobe-assets", Class::Standalone),
     // Pen tablet input (the one isolated `unsafe` helper: AppKit interop on macOS).

@@ -23,7 +23,7 @@ USAGE:
       its alpha, 24 none. Without it: 32 with an alpha channel or transparency, else 24.
       --dpx-bits sets a DPX's bits per sample. Without it: 8 for an 8-bit document, else 16.
   photocraft-cli info <file> [--compact]
-      Print the document as JSON (size, mode, depth, layer tree).
+      Print the document as JSON (size, mode, depth, layer tree, the file's C2PA Content Credentials).
   photocraft-cli run (<file> | --new <json>) --cmd <id> [--params <json>] [--cmd …] [--out <file>] [--format <ext>] [--quality <1-100>] [--tiff-layers] [--tga-bits <24|32>] [--dpx-bits <8|10|12|16>]
       Open a file, run engine commands in order, save the result. Each --params
       applies to the preceding --cmd. Prints each command's JSON result.
@@ -652,6 +652,20 @@ mod missing_font_warning_tests {
         assert!(stdout.is_empty());
         assert_eq!(stderr.matches(family).count(), 1);
 
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    #[test]
+    fn info_reports_content_credentials() {
+        let folder = std::env::temp_dir().join(format!("photocraft-cli-c2pa-{}", std::process::id()));
+        std::fs::create_dir_all(&folder).unwrap();
+        let png = folder.join("plain.png").to_string_lossy().to_string();
+        let (code, _, stderr) = invoke(&["run", "--new", r#"{"width":4,"height":4}"#, "--out", &png]);
+        assert_eq!(code, 0, "{stderr}");
+        let (code, stdout, stderr) = invoke(&["info", &png, "--compact"]);
+        assert_eq!(code, 0, "{stderr}");
+        let info: Value = serde_json::from_str(&stdout).unwrap();
+        assert_eq!(info["contentCredentials"], json!({"state": "none"}), "{info}");
         let _ = std::fs::remove_dir_all(&folder);
     }
 

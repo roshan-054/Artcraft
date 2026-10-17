@@ -1,0 +1,37 @@
+[package]
+name = "photocraft-provenance"
+description = "Reads and verifies C2PA Content Credentials embedded in image files (a thin, panic-guarded wrapper around the c2pa reference SDK)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[features]
+# Verification through the c2pa SDK. Off by default: c2pa turns on serde_json's `preserve_order`,
+# which changes the key order of every JSON object in a build that includes it. Without it, a file
+# that carries a manifest is reported as present but unverifiable, and nothing else is pulled in.
+c2pa = ["dep:c2pa", "dep:serde_json"]
+# Synthetic signed files and test-only certificates for the tests of this and dependent crates.
+testgen = ["c2pa"]
+
+[dependencies]
+serde = { workspace = true }
+memchr = "2"
+# Settings for the SDK reader (already in the tree through c2pa).
+serde_json = { workspace = true, optional = true }
+# The C2PA reference implementation. Pure-Rust crypto (no OpenSSL), no HTTP clients and no remote
+# manifest fetching: inspection only reads the bytes it is given. Pinned exactly: it parses
+# untrusted files, and 0.90.22 is the last release whose MSRV (1.88) fits the workspace's 1.95.
+c2pa = { version = "=0.90.22", default-features = false, features = ["rust_native_crypto"], optional = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+
+# Signs files with the c2pa SDK, so it only runs when asked for (see the `c2pa` feature):
+# `cargo test -p photocraft-provenance --features testgen`.
+[[test]]
+name = "inspect"
+required-features = ["testgen"]
+
+[lints]
+workspace = true

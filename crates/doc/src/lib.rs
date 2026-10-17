@@ -836,6 +836,9 @@ impl AlphaChannel {
     }
 }
 
+/// The Content Credentials report types stored in [`Metadata::content_credentials`].
+pub use photocraft_provenance as provenance;
+
 /// A raw PSD global tagged block: (signature, key, data).
 pub type PsdGlobalBlock = ([u8; 4], [u8; 4], Arc<Vec<u8>>);
 
@@ -850,6 +853,10 @@ pub struct Metadata {
     /// Raw PSD global additional-layer-info blocks: (signature, key, data),
     /// e.g. `lnk2` embedded smart-object files, `Patt` patterns, `Txt2`.
     pub psd_global_blocks: Vec<PsdGlobalBlock>,
+    /// C2PA Content Credentials of the file this document was opened from, checked on open
+    /// (#1050). It describes that file as it was: edits don't update it and saves don't write it,
+    /// so it is never stored in `.pcraft` (a PSD's `CAI ` block still round-trips as a raw block).
+    pub content_credentials: Option<photocraft_provenance::Report>,
 }
 
 #[derive(Clone, Debug, PartialEq)]

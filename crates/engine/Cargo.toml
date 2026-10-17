@@ -10,6 +10,8 @@ workspace = true
 [features]
 # Real-file corpus tests (opt-in; `cargo xtask test-corpus`). Fail when the corpus is missing.
 corpus = []
+# Verify C2PA Content Credentials on open (forwarded to photocraft-io; see its feature).
+content-credentials = ["photocraft-io/content-credentials"]
 
 [dependencies]
 photocraft-geom = { workspace = true }

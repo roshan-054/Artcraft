@@ -262,10 +262,29 @@ pub fn import_with_svg_group_depth_and_interrupt(
     ctl: &photocraft_raster::Interrupt,
 ) -> Result<ImportResult, IoError> {
     ctl.check().map_err(|_| IoError::Cancelled)?;
-    let r = import_stages(name, bytes, ctl, max_group_depth)?;
+    let mut r = import_stages(name, bytes, ctl, max_group_depth)?;
     ctl.check().map_err(|_| IoError::Cancelled)?;
+    check_content_credentials(&mut r, bytes);
     ctl.progress(1.0);
     Ok(r)
+}
+
+/// Records the C2PA Content Credentials of the file as opened (#1050). A manifest that can't be
+/// read never stops the open: the document records it as invalid and the import notes why.
+fn check_content_credentials(r: &mut ImportResult, bytes: &[u8]) {
+    let options = photocraft_provenance::Options::default();
+    r.document.metadata.content_credentials = match photocraft_provenance::inspect(bytes, &options) {
+        // Photoshop keeps a PSD's manifest in a `CAI ` global block (kept verbatim on save), but
+        // C2PA maps no PSD container, so nothing can be checked against the file.
+        Ok(None) if is_psd(bytes) && r.document.metadata.psd_global_blocks.iter().any(|(_, key, _)| key == b"CAI ") => {
+            Some(photocraft_provenance::Report::unsupported("C2PA defines no container mapping for PSD files"))
+        }
+        Ok(report) => report,
+        Err(e) => {
+            r.warnings.push(e.to_string());
+            Some(photocraft_provenance::Report::from_error(&e))
+        }
+    };
 }
 
 fn import_stages(name: &str, bytes: &[u8], ctl: &photocraft_raster::Interrupt, max_group_depth: usize) -> Result<ImportResult, IoError> {

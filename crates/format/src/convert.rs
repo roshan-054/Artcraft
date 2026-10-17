@@ -580,6 +580,8 @@ impl Loader<'_> {
             text: m.metadata.text.clone(),
             psd_resources: Vec::new(),
             psd_global_blocks: Vec::new(),
+            // Describes the file a document was opened from; a saved document has none.
+            content_credentials: None,
         };
         for (id, n, h) in &m.metadata.psd_resources {
             md.psd_resources.push((*id, n.clone(), self.fetch.blob(h)?));
