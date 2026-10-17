@@ -3389,3 +3389,19 @@ curves	Smooth	매끄럽게
 	Replace	대치
 	{name} was changed by another app after it was opened or saved here.	{name}이(가) 여기서 열거나 저장한 뒤 다른 앱에서 변경되었습니다.
 	Replace it with this document, or cancel and use File › Save As to keep both.	이 문서로 대치하거나, 취소하고 파일 › 다른 이름으로 저장을 사용해 둘 다 보관하세요.
+
+# Scroll Wheel Mapping (Preferences > General)
+	Scroll Wheel Mapping	스크롤 휠 매핑
+	Scroll Wheel	스크롤 휠
+	Shift + Scroll Wheel	Shift + 스크롤 휠
+	Ctrl/Cmd + Scroll Wheel	Ctrl/Cmd + 스크롤 휠
+	Alt + Scroll Wheel	Alt + 스크롤 휠
+	Shift + Alt + Scroll Wheel	Shift + Alt + 스크롤 휠
+	Ctrl/Cmd + Shift + Scroll Wheel	Ctrl/Cmd + Shift + 스크롤 휠
+	Ctrl/Cmd + Alt + Scroll Wheel	Ctrl/Cmd + Alt + 스크롤 휠
+	Ctrl/Cmd + Shift + Alt + Scroll Wheel	Ctrl/Cmd + Shift + Alt + 스크롤 휠
+	Default (as in Photoshop)	기본값 (Photoshop과 동일)
+	Scroll up and down	위아래로 스크롤
+	Scroll sideways	좌우로 스크롤
+	Zoom to the next level	다음 단계로 확대/축소
+	Do nothing	아무 동작 안 함

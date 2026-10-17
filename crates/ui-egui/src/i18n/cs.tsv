@@ -3818,3 +3818,19 @@ navigator	Zoom	Zvětšení
 	GPU Memory (MB, 0 = Automatic)	Paměť GPU (MB, 0 = Automaticky)
 	{name} was changed by another app after it was opened or saved here.	Soubor {name} změnila jiná aplikace poté, co byl zde otevřen nebo uložen.
 	Replace it with this document, or cancel and use File › Save As to keep both.	Nahraďte ho tímto dokumentem, nebo zrušte a použijte Soubor › Uložit jako, abyste zachovali obojí.
+
+# Scroll Wheel Mapping (Preferences > General)
+	Scroll Wheel Mapping	Přiřazení kolečka myši
+	Scroll Wheel	Kolečko myši
+	Shift + Scroll Wheel	Shift + Kolečko myši
+	Ctrl/Cmd + Scroll Wheel	Ctrl/Cmd + Kolečko myši
+	Alt + Scroll Wheel	Alt + Kolečko myši
+	Shift + Alt + Scroll Wheel	Shift + Alt + Kolečko myši
+	Ctrl/Cmd + Shift + Scroll Wheel	Ctrl/Cmd + Shift + Kolečko myši
+	Ctrl/Cmd + Alt + Scroll Wheel	Ctrl/Cmd + Alt + Kolečko myši
+	Ctrl/Cmd + Shift + Alt + Scroll Wheel	Ctrl/Cmd + Shift + Alt + Kolečko myši
+	Default (as in Photoshop)	Výchozí (jako ve Photoshopu)
+	Scroll up and down	Posouvat nahoru a dolů
+	Scroll sideways	Posouvat do stran
+	Zoom to the next level	Zvětšit na další úroveň
+	Do nothing	Nedělat nic

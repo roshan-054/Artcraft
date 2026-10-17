@@ -3697,3 +3697,19 @@ curves	Smooth	Làm mượt
 	Replace	Thay thế
 	{name} was changed by another app after it was opened or saved here.	{name} đã bị một ứng dụng khác thay đổi sau khi được mở hoặc lưu ở đây.
 	Replace it with this document, or cancel and use File › Save As to keep both.	Thay thế bằng tài liệu này, hoặc hủy và dùng Tệp › Lưu thành để giữ cả hai.
+
+# Scroll Wheel Mapping (Preferences > General)
+	Scroll Wheel Mapping	Ánh xạ bánh xe cuộn
+	Scroll Wheel	Bánh xe cuộn
+	Shift + Scroll Wheel	Shift + Bánh xe cuộn
+	Ctrl/Cmd + Scroll Wheel	Ctrl/Cmd + Bánh xe cuộn
+	Alt + Scroll Wheel	Alt + Bánh xe cuộn
+	Shift + Alt + Scroll Wheel	Shift + Alt + Bánh xe cuộn
+	Ctrl/Cmd + Shift + Scroll Wheel	Ctrl/Cmd + Shift + Bánh xe cuộn
+	Ctrl/Cmd + Alt + Scroll Wheel	Ctrl/Cmd + Alt + Bánh xe cuộn
+	Ctrl/Cmd + Shift + Alt + Scroll Wheel	Ctrl/Cmd + Shift + Alt + Bánh xe cuộn
+	Default (as in Photoshop)	Mặc định (như trong Photoshop)
+	Scroll up and down	Cuộn lên và xuống
+	Scroll sideways	Cuộn sang ngang
+	Zoom to the next level	Thu phóng đến mức tiếp theo
+	Do nothing	Không làm gì

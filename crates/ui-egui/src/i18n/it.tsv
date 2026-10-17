@@ -4331,3 +4331,19 @@ shape	Appearance	Aspetto
 	GPU Memory (MB, 0 = Automatic)	Memoria GPU (MB, 0 = Automatico)
 	{name} was changed by another app after it was opened or saved here.	{name} è stato modificato da un'altra app dopo essere stato aperto o salvato qui.
 	Replace it with this document, or cancel and use File › Save As to keep both.	Sostituiscilo con questo documento, oppure annulla e usa File › Salva con nome per tenerli entrambi.
+
+# Scroll Wheel Mapping (Preferences > General)
+	Scroll Wheel Mapping	Assegnazione della rotella
+	Scroll Wheel	Rotella
+	Shift + Scroll Wheel	Shift + Rotella
+	Ctrl/Cmd + Scroll Wheel	Ctrl/Cmd + Rotella
+	Alt + Scroll Wheel	Alt + Rotella
+	Shift + Alt + Scroll Wheel	Shift + Alt + Rotella
+	Ctrl/Cmd + Shift + Scroll Wheel	Ctrl/Cmd + Shift + Rotella
+	Ctrl/Cmd + Alt + Scroll Wheel	Ctrl/Cmd + Alt + Rotella
+	Ctrl/Cmd + Shift + Alt + Scroll Wheel	Ctrl/Cmd + Shift + Alt + Rotella
+	Default (as in Photoshop)	Predefinito (come in Photoshop)
+	Scroll up and down	Scorri su e giù
+	Scroll sideways	Scorri di lato
+	Zoom to the next level	Zoom al livello successivo
+	Do nothing	Non fare nulla

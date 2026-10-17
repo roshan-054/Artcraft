@@ -3809,3 +3809,19 @@ curves	Smooth	Wygładź
 	Replace	Zastąp
 	{name} was changed by another app after it was opened or saved here.	Plik {name} został zmieniony przez inną aplikację po otwarciu lub zapisaniu go tutaj.
 	Replace it with this document, or cancel and use File › Save As to keep both.	Zastąp go tym dokumentem albo anuluj i użyj Plik › Zapisz jako, aby zachować oba.
+
+# Scroll Wheel Mapping (Preferences > General)
+	Scroll Wheel Mapping	Mapowanie kółka myszy
+	Scroll Wheel	Kółko myszy
+	Shift + Scroll Wheel	Shift + Kółko myszy
+	Ctrl/Cmd + Scroll Wheel	Ctrl/Cmd + Kółko myszy
+	Alt + Scroll Wheel	Alt + Kółko myszy
+	Shift + Alt + Scroll Wheel	Shift + Alt + Kółko myszy
+	Ctrl/Cmd + Shift + Scroll Wheel	Ctrl/Cmd + Shift + Kółko myszy
+	Ctrl/Cmd + Alt + Scroll Wheel	Ctrl/Cmd + Alt + Kółko myszy
+	Ctrl/Cmd + Shift + Alt + Scroll Wheel	Ctrl/Cmd + Shift + Alt + Kółko myszy
+	Default (as in Photoshop)	Domyślnie (jak w Photoshopie)
+	Scroll up and down	Przewijaj w górę i w dół
+	Scroll sideways	Przewijaj na boki
+	Zoom to the next level	Powiększ do następnego poziomu
+	Do nothing	Nic nie rób

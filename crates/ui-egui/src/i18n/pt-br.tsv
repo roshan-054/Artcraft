@@ -4000,3 +4000,19 @@ layerLabel	No Color	Sem cor
 	GPU Memory (MB, 0 = Automatic)	Memória da GPU (MB, 0 = Automático)
 	{name} was changed by another app after it was opened or saved here.	{name} foi alterado por outro app depois de ser aberto ou salvo aqui.
 	Replace it with this document, or cancel and use File › Save As to keep both.	Substitua-o por este documento, ou cancele e use Arquivo › Salvar como para manter os dois.
+
+# Scroll Wheel Mapping (Preferences > General)
+	Scroll Wheel Mapping	Mapeamento da roda de rolagem
+	Scroll Wheel	Roda de rolagem
+	Shift + Scroll Wheel	Shift + Roda de rolagem
+	Ctrl/Cmd + Scroll Wheel	Ctrl/Cmd + Roda de rolagem
+	Alt + Scroll Wheel	Alt + Roda de rolagem
+	Shift + Alt + Scroll Wheel	Shift + Alt + Roda de rolagem
+	Ctrl/Cmd + Shift + Scroll Wheel	Ctrl/Cmd + Shift + Roda de rolagem
+	Ctrl/Cmd + Alt + Scroll Wheel	Ctrl/Cmd + Alt + Roda de rolagem
+	Ctrl/Cmd + Shift + Alt + Scroll Wheel	Ctrl/Cmd + Shift + Alt + Roda de rolagem
+	Default (as in Photoshop)	Padrão (como no Photoshop)
+	Scroll up and down	Rolar para cima e para baixo
+	Scroll sideways	Rolar para os lados
+	Zoom to the next level	Zoom para o próximo nível
+	Do nothing	Não fazer nada

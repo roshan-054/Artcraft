@@ -3181,3 +3181,19 @@ curves	Smooth	Сгладить
 	Replace	Заменить
 	{name} was changed by another app after it was opened or saved here.	Файл {name} был изменён другим приложением после того, как его открыли или сохранили здесь.
 	Replace it with this document, or cancel and use File › Save As to keep both.	Замените его этим документом или отмените и используйте Файл › Сохранить как, чтобы сохранить оба.
+
+# Scroll Wheel Mapping (Preferences > General)
+	Scroll Wheel Mapping	Назначение колеса мыши
+	Scroll Wheel	Колесо мыши
+	Shift + Scroll Wheel	Shift + Колесо мыши
+	Ctrl/Cmd + Scroll Wheel	Ctrl/Cmd + Колесо мыши
+	Alt + Scroll Wheel	Alt + Колесо мыши
+	Shift + Alt + Scroll Wheel	Shift + Alt + Колесо мыши
+	Ctrl/Cmd + Shift + Scroll Wheel	Ctrl/Cmd + Shift + Колесо мыши
+	Ctrl/Cmd + Alt + Scroll Wheel	Ctrl/Cmd + Alt + Колесо мыши
+	Ctrl/Cmd + Shift + Alt + Scroll Wheel	Ctrl/Cmd + Shift + Alt + Колесо мыши
+	Default (as in Photoshop)	По умолчанию (как в Photoshop)
+	Scroll up and down	Прокрутка вверх и вниз
+	Scroll sideways	Прокрутка в стороны
+	Zoom to the next level	Масштаб до следующего уровня
+	Do nothing	Ничего не делать

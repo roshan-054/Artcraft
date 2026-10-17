@@ -2827,3 +2827,19 @@ curves	Smooth	平滑
 	Replace	替换
 	{name} was changed by another app after it was opened or saved here.	{name} 在此处打开或存储后已被其他应用更改。
 	Replace it with this document, or cancel and use File › Save As to keep both.	用此文档替换它，或取消并使用“文件 › 另存为”以保留两者。
+
+# Scroll Wheel Mapping (Preferences > General)
+	Scroll Wheel Mapping	滚轮映射
+	Scroll Wheel	滚轮
+	Shift + Scroll Wheel	Shift + 滚轮
+	Ctrl/Cmd + Scroll Wheel	Ctrl/Cmd + 滚轮
+	Alt + Scroll Wheel	Alt + 滚轮
+	Shift + Alt + Scroll Wheel	Shift + Alt + 滚轮
+	Ctrl/Cmd + Shift + Scroll Wheel	Ctrl/Cmd + Shift + 滚轮
+	Ctrl/Cmd + Alt + Scroll Wheel	Ctrl/Cmd + Alt + 滚轮
+	Ctrl/Cmd + Shift + Alt + Scroll Wheel	Ctrl/Cmd + Shift + Alt + 滚轮
+	Default (as in Photoshop)	默认（与 Photoshop 相同）
+	Scroll up and down	上下滚动
+	Scroll sideways	左右滚动
+	Zoom to the next level	缩放到下一级别
+	Do nothing	不执行任何操作

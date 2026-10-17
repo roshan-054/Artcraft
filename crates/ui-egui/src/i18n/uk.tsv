@@ -3910,3 +3910,19 @@ curves	Smooth	Згладити
 	Replace	Замінити
 	{name} was changed by another app after it was opened or saved here.	Файл {name} змінила інша програма після того, як його тут відкрили або зберегли.
 	Replace it with this document, or cancel and use File › Save As to keep both.	Замініть його цим документом або скасуйте й скористайтеся Файл › Зберегти як, щоб зберегти обидва.
+
+# Scroll Wheel Mapping (Preferences > General)
+	Scroll Wheel Mapping	Призначення коліщатка миші
+	Scroll Wheel	Коліщатко миші
+	Shift + Scroll Wheel	Shift + Коліщатко миші
+	Ctrl/Cmd + Scroll Wheel	Ctrl/Cmd + Коліщатко миші
+	Alt + Scroll Wheel	Alt + Коліщатко миші
+	Shift + Alt + Scroll Wheel	Shift + Alt + Коліщатко миші
+	Ctrl/Cmd + Shift + Scroll Wheel	Ctrl/Cmd + Shift + Коліщатко миші
+	Ctrl/Cmd + Alt + Scroll Wheel	Ctrl/Cmd + Alt + Коліщатко миші
+	Ctrl/Cmd + Shift + Alt + Scroll Wheel	Ctrl/Cmd + Shift + Alt + Коліщатко миші
+	Default (as in Photoshop)	Типово (як у Photoshop)
+	Scroll up and down	Прокручувати вгору і вниз
+	Scroll sideways	Прокручувати вбік
+	Zoom to the next level	Масштаб до наступного рівня
+	Do nothing	Нічого не робити

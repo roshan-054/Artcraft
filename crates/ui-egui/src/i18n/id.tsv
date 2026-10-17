@@ -3203,3 +3203,19 @@ curves	Smooth	Haluskan
 	Replace	Ganti
 	{name} was changed by another app after it was opened or saved here.	{name} diubah oleh aplikasi lain setelah dibuka atau disimpan di sini.
 	Replace it with this document, or cancel and use File › Save As to keep both.	Ganti dengan dokumen ini, atau batalkan dan gunakan Berkas › Simpan Sebagai untuk menyimpan keduanya.
+
+# Scroll Wheel Mapping (Preferences > General)
+	Scroll Wheel Mapping	Pemetaan roda gulir
+	Scroll Wheel	Roda gulir
+	Shift + Scroll Wheel	Shift + Roda gulir
+	Ctrl/Cmd + Scroll Wheel	Ctrl/Cmd + Roda gulir
+	Alt + Scroll Wheel	Alt + Roda gulir
+	Shift + Alt + Scroll Wheel	Shift + Alt + Roda gulir
+	Ctrl/Cmd + Shift + Scroll Wheel	Ctrl/Cmd + Shift + Roda gulir
+	Ctrl/Cmd + Alt + Scroll Wheel	Ctrl/Cmd + Alt + Roda gulir
+	Ctrl/Cmd + Shift + Alt + Scroll Wheel	Ctrl/Cmd + Shift + Alt + Roda gulir
+	Default (as in Photoshop)	Default (seperti di Photoshop)
+	Scroll up and down	Gulir ke atas dan bawah
+	Scroll sideways	Gulir ke samping
+	Zoom to the next level	Zoom ke tingkat berikutnya
+	Do nothing	Tidak melakukan apa-apa

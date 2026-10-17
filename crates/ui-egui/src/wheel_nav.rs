@@ -24,6 +24,7 @@
 //! wheel event: releasing Alt while the tail is still settling must not turn it into a pan.
 
 use egui::{Context, Event, Id, Modifiers, MouseWheelUnit, RawInput, Vec2};
+use photocraft_engine::prefs::{General, WheelAction};
 
 /// Zoom factor of one wheel notch: every step is exactly ×1.1.
 pub const NOTCH: f32 = 1.1;
@@ -167,6 +168,105 @@ pub fn fold_legacy_pinch(ctx: &Context, raw: &mut RawInput) {
     }
 }
 
+fn mapped_id() -> Id {
+    Id::new("pc-wheel-mapped")
+}
+
+/// The wheel action chosen for each modifier combination (Preferences › General › Scroll Wheel
+/// Mapping). Ctrl and Cmd count as one modifier, as everywhere else in the app.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Bindings {
+    actions: [WheelAction; 8],
+}
+
+impl Default for Bindings {
+    /// Every combination keeps the Photoshop behaviour.
+    fn default() -> Self {
+        Self { actions: [WheelAction::Default; 8] }
+    }
+}
+
+impl Bindings {
+    pub fn from_prefs(g: &General) -> Self {
+        let mut actions = [WheelAction::Default; 8];
+        for (i, a) in actions.iter_mut().enumerate() {
+            *a = g.wheel_action(i & 1 != 0, i & 2 != 0, i & 4 != 0);
+        }
+        Self { actions }
+    }
+
+    fn index(shift: bool, ctrl: bool, alt: bool) -> usize {
+        usize::from(shift) | usize::from(ctrl) << 1 | usize::from(alt) << 2
+    }
+
+    /// The action for the modifiers held with one wheel event.
+    pub fn get(&self, m: &Modifiers) -> WheelAction {
+        self.actions.get(Self::index(m.shift, m.command || m.ctrl, m.alt)).copied().unwrap_or_default()
+    }
+
+    /// Does every combination keep the Photoshop behaviour?
+    pub fn is_default(&self) -> bool {
+        self.actions.iter().all(|a| *a == WheelAction::Default)
+    }
+
+    /// Has Ctrl + wheel been given its own action? Then a touchpad pinch that arrives as Ctrl +
+    /// wheel (Windows, some Linux Wayland systems) must not be folded into a zoom first.
+    pub fn ctrl_is_mapped(&self) -> bool {
+        self.actions.get(Self::index(false, true, false)).is_some_and(|a| *a != WheelAction::Default)
+    }
+}
+
+/// What this frame's wheel events do under the mapping: a pinch zooms first; otherwise the events
+/// are added up per action. Zooming goes by exact ×1.1 notches, `zoomSnap` steps the zoom ladder,
+/// and scrolling moves the view by the wheel's own distance in the frame it arrives. Events whose
+/// combination is `default` or `none`, and the smoothed tail after the last event, do nothing.
+fn mapped_gesture(
+    ctx: &Context,
+    bindings: &Bindings,
+    wheel: &[(MouseWheelUnit, Vec2, Modifiers)],
+    zoom_delta: f32,
+    owner: Id,
+    notch: f32,
+    page: f32,
+) -> Option<Wheel> {
+    if zoom_delta.is_finite() && zoom_delta > 0.0 && zoom_delta != 1.0 {
+        return Some(Wheel::Zoom(zoom_delta));
+    }
+    let notch = if notch.is_finite() && notch > 0.0 { notch } else { 40.0 };
+    let (mut zoom, mut snap, mut pan) = (1.0f32, 0.0f32, Vec2::ZERO);
+    for (unit, delta, m) in wheel {
+        let d = *delta
+            * match unit {
+                MouseWheelUnit::Point => 1.0,
+                MouseWheelUnit::Line => notch,
+                MouseWheelUnit::Page => page,
+            };
+        // Some systems deliver a modified wheel sideways (x, y = 0): add both axes.
+        let along = d.x + d.y;
+        if !along.is_finite() {
+            continue;
+        }
+        match bindings.get(m) {
+            WheelAction::Default | WheelAction::None => {}
+            WheelAction::Zoom => zoom *= NOTCH.powf(along / notch),
+            WheelAction::ZoomSnap => snap += along,
+            // The plain wheel keeps a tilt wheel's sideways scroll; with a modifier everything goes down the axis.
+            WheelAction::ScrollVertical if !(m.shift || m.command || m.ctrl || m.alt) => pan += d,
+            WheelAction::ScrollVertical => pan.y += along,
+            WheelAction::ScrollHorizontal => pan.x += along,
+        }
+    }
+    if zoom.is_finite() && zoom > 0.0 && zoom != 1.0 {
+        return Some(Wheel::Zoom(zoom));
+    }
+    if snap != 0.0
+        && let Some(w) = snap_accumulate(ctx, owner, snap, notch)
+    {
+        return Some(w);
+    }
+    (pan.x.is_finite() && pan.y.is_finite() && (pan.x != 0.0 || pan.y != 0.0)).then_some(Wheel::Pan(pan))
+}
+
 fn alt_id() -> Id {
     Id::new("pc-wheel-alt")
 }
@@ -193,6 +293,52 @@ fn active_snap_owner_id() -> Id {
 
 const SNAP_IDLE_TIMEOUT: f64 = 0.5;
 
+/// Accumulate `dy` wheel points on the zoom-ladder residual of `owner` and return the whole
+/// rungs to step. A second call in the same frame returns the first one's result.
+fn snap_accumulate(ctx: &Context, owner: Id, dy: f32, notch: f32) -> Option<Wheel> {
+    if dy == 0.0 {
+        return None;
+    }
+
+    // Per-frame idempotency: a second read in the same frame returns the cached result.
+    let frame_nr = ctx.cumulative_pass_nr();
+    if let Some((cached_frame, cached_steps)) = ctx.data(|d| d.get_temp::<(u64, i32)>(snap_frame_result_id(owner)))
+        && cached_frame == frame_nr
+    {
+        return if cached_steps == 0 { None } else { Some(Wheel::SnapZoom(cached_steps)) };
+    }
+
+    // When the receiving viewport changes, clear the old viewport's residual so a
+    // partial gesture doesn't reappear when returning to it.
+    let prev_active = ctx.data(|d| d.get_temp::<Id>(active_snap_owner_id()));
+    if let Some(old) = prev_active.filter(|&p| p != owner) {
+        ctx.data_mut(|d| {
+            d.remove::<f32>(snap_residual_id(old));
+            d.remove::<f64>(snap_time_id(old));
+        });
+    }
+    ctx.data_mut(|d| d.insert_temp(active_snap_owner_id(), owner));
+
+    let now = ctx.input(|i| i.time);
+    let last_time = ctx.data(|d| d.get_temp::<f64>(snap_time_id(owner)));
+    let prev = if last_time.is_some_and(|t| now - t < SNAP_IDLE_TIMEOUT && (now - t).is_finite()) {
+        ctx.data(|d| d.get_temp::<f32>(snap_residual_id(owner))).unwrap_or(0.0)
+    } else {
+        0.0
+    };
+    let notch_val = if notch.is_finite() && notch > 0.0 { notch } else { 40.0 };
+    let total = prev + dy;
+    let n = if total.is_finite() { (total / notch_val).trunc() } else { 0.0 };
+    let remainder = total - n * notch_val;
+    let steps = n.clamp(-10.0, 10.0) as i32;
+    ctx.data_mut(|d| {
+        d.insert_temp(snap_residual_id(owner), if remainder.is_finite() { remainder } else { 0.0 });
+        d.insert_temp(snap_time_id(owner), now);
+        d.insert_temp(snap_frame_result_id(owner), (frame_nr, steps));
+    });
+    if steps == 0 { None } else { Some(Wheel::SnapZoom(steps)) }
+}
+
 /// Read this frame's wheel input. Call it every frame (hovered or not) so the Alt and Shift
 /// states of the gesture follow the latest wheel event. `owner` scopes the snap-zoom
 /// accumulator per viewport. `hovered` gates accumulation: only the viewport receiving
@@ -205,6 +351,13 @@ pub fn read(ctx: &Context, zoom_with_wheel: bool, pinch_zooms: bool, owner: Id, 
 /// smoothed delta); off, as with Interface › Enable Animations off, the view moves the whole notch
 /// in the frame the wheel turns and stops there (#5721), as scroll areas already do.
 pub fn read_with(ctx: &Context, zoom_with_wheel: bool, pinch_zooms: bool, owner: Id, hovered: bool, smooth: bool) -> Option<Wheel> {
+    read_bound(ctx, &Bindings::default(), zoom_with_wheel, pinch_zooms, owner, hovered, smooth)
+}
+
+/// [`read_with`] with the user's Scroll Wheel Mapping. A gesture whose modifiers are mapped to
+/// anything but `default` is handled by the mapping alone, from the wheel events themselves; every
+/// other gesture keeps the Photoshop behaviour above.
+pub fn read_bound(ctx: &Context, bindings: &Bindings, zoom_with_wheel: bool, pinch_zooms: bool, owner: Id, hovered: bool, smooth: bool) -> Option<Wheel> {
     let notch = ctx.options(|o| o.input_options.line_scroll_speed);
 
     // --- Modifier tracking (always runs for all callers) ---
@@ -242,8 +395,25 @@ pub fn read_with(ctx: &Context, zoom_with_wheel: bool, pinch_zooms: bool, owner:
         None => ctx.data(|d| d.get_temp::<bool>(shift_id())).unwrap_or(false),
     };
 
+    // Which gesture is in progress: the latest wheel event decides, and the smoothed tail of a
+    // mapped gesture must not turn into a pan once its events stop. Only the canvas passes a
+    // mapping, so the navigator and Camera Raw never reset it.
+    let mapped = !bindings.is_default() && {
+        let now = wheel.last().map(|(_, _, m)| bindings.get(m) != WheelAction::Default);
+        match now {
+            Some(c) => {
+                ctx.data_mut(|d| d.insert_temp(mapped_id(), c));
+                c
+            }
+            None => ctx.data(|d| d.get_temp::<bool>(mapped_id())).unwrap_or(false),
+        }
+    };
+
     if !hovered {
         return None;
+    }
+    if mapped {
+        return mapped_gesture(ctx, bindings, &wheel, if pinch_zooms { zoom_delta } else { 1.0 }, owner, notch, page);
     }
 
     // --- Input classification (hovered viewport only) ---
@@ -274,48 +444,7 @@ pub fn read_with(ctx: &Context, zoom_with_wheel: bool, pinch_zooms: bool, owner:
     let has_pinch = pinch_zooms && zoom_delta.is_finite() && zoom_delta > 0.0 && zoom_delta != 1.0;
 
     if snap_mode && !has_pinch {
-        let dy = raw.y + raw.x;
-        if dy == 0.0 {
-            return None;
-        }
-
-        // Per-frame idempotency: a second read in the same frame returns the cached result.
-        let frame_nr = ctx.cumulative_pass_nr();
-        if let Some((cached_frame, cached_steps)) = ctx.data(|d| d.get_temp::<(u64, i32)>(snap_frame_result_id(owner)))
-            && cached_frame == frame_nr
-        {
-            return if cached_steps == 0 { None } else { Some(Wheel::SnapZoom(cached_steps)) };
-        }
-
-        // When the receiving viewport changes, clear the old viewport's residual so a
-        // partial gesture doesn't reappear when returning to it.
-        let prev_active = ctx.data(|d| d.get_temp::<Id>(active_snap_owner_id()));
-        if let Some(old) = prev_active.filter(|&p| p != owner) {
-            ctx.data_mut(|d| {
-                d.remove::<f32>(snap_residual_id(old));
-                d.remove::<f64>(snap_time_id(old));
-            });
-        }
-        ctx.data_mut(|d| d.insert_temp(active_snap_owner_id(), owner));
-
-        let now = ctx.input(|i| i.time);
-        let last_time = ctx.data(|d| d.get_temp::<f64>(snap_time_id(owner)));
-        let prev = if last_time.is_some_and(|t| now - t < SNAP_IDLE_TIMEOUT && (now - t).is_finite()) {
-            ctx.data(|d| d.get_temp::<f32>(snap_residual_id(owner))).unwrap_or(0.0)
-        } else {
-            0.0
-        };
-        let notch_val = if notch.is_finite() && notch > 0.0 { notch } else { 40.0 };
-        let total = prev + dy;
-        let n = if total.is_finite() { (total / notch_val).trunc() } else { 0.0 };
-        let remainder = total - n * notch_val;
-        let steps = n.clamp(-10.0, 10.0) as i32;
-        ctx.data_mut(|d| {
-            d.insert_temp(snap_residual_id(owner), if remainder.is_finite() { remainder } else { 0.0 });
-            d.insert_temp(snap_time_id(owner), now);
-            d.insert_temp(snap_frame_result_id(owner), (frame_nr, steps));
-        });
-        if steps == 0 { None } else { Some(Wheel::SnapZoom(steps)) }
+        snap_accumulate(ctx, owner, raw.y + raw.x, notch)
     } else {
         if !snap_mode {
             ctx.data_mut(|d| {
@@ -921,5 +1050,138 @@ mod tests {
         assert_eq!(snaps, 1, "Line-unit notch produces 1 step");
         let (_, _, snaps) = gesture(vec![vec![wheel(Vec2::new(0.0, -1.0), Modifiers::SHIFT)]], true, false);
         assert_eq!(snaps, -1, "Line-unit notch down produces −1 step");
+    }
+
+    const SHIFT: Modifiers = Modifiers { shift: true, ..Modifiers::NONE };
+    const ALT: Modifiers = Modifiers { alt: true, ..Modifiers::NONE };
+
+    fn bindings(set: &[(Modifiers, WheelAction)]) -> Bindings {
+        let mut g = General::default();
+        for (m, a) in set {
+            match (m.shift, m.command || m.ctrl, m.alt) {
+                (false, false, false) => g.wheel_action_plain = *a,
+                (true, false, false) => g.wheel_action_shift = *a,
+                (false, true, false) => g.wheel_action_ctrl = *a,
+                (false, false, true) => g.wheel_action_alt = *a,
+                (true, false, true) => g.wheel_action_shift_alt = *a,
+                (true, true, false) => g.wheel_action_ctrl_shift = *a,
+                (false, true, true) => g.wheel_action_ctrl_alt = *a,
+                (true, true, true) => g.wheel_action_ctrl_shift_alt = *a,
+            }
+        }
+        Bindings::from_prefs(&g)
+    }
+
+    /// Like `gesture`, through `read_bound` with the given mapping; returns pan, zoom and snap steps.
+    fn mapped(frames: Vec<Vec<Event>>, bindings: &Bindings) -> (Vec2, f32, i32) {
+        let owner = Id::new("test-mapped");
+        let ctx = Context::default();
+        configure(&ctx);
+        let (mut pan, mut zoom, mut snaps) = (Vec2::ZERO, 1.0, 0i32);
+        let mut frames = frames.into_iter();
+        for n in 0..60 {
+            let raw = RawInput { time: Some(f64::from(n) / 60.0), predicted_dt: 1.0 / 60.0, events: frames.next().unwrap_or_default(), ..Default::default() };
+            let mut out = ctx.run_ui(raw, |ui| match read_bound(ui.ctx(), bindings, false, true, owner, true, true) {
+                Some(Wheel::Pan(d)) => pan += d,
+                Some(Wheel::Zoom(f)) => zoom *= f,
+                Some(Wheel::SnapZoom(n)) => snaps += n,
+                None => {}
+            });
+            out.textures_delta.clear();
+        }
+        (pan, zoom, snaps)
+    }
+
+    #[test]
+    fn the_default_mapping_changes_nothing() {
+        let b = Bindings::default();
+        assert!(b.is_default() && !b.ctrl_is_mapped());
+        let frames = || vec![vec![wheel(Vec2::new(0.0, 1.0), CTRL)], vec![wheel(Vec2::new(0.0, 1.0), Modifiers::NONE)]];
+        let (pan, zoom, _) = mapped(frames(), &b);
+        let (want_pan, want_zoom, _) = gesture(frames(), false, false);
+        assert!((pan - want_pan).length() < 1e-3 && (zoom - want_zoom).abs() < 1e-6, "{pan:?} {zoom} vs {want_pan:?} {want_zoom}");
+    }
+
+    #[test]
+    fn ctrl_wheel_can_zoom_like_a_browser() {
+        let b = bindings(&[(CTRL, WheelAction::Zoom)]);
+        assert!(b.ctrl_is_mapped());
+        let (pan, zoom, snaps) = mapped(vec![vec![wheel(Vec2::new(0.0, 1.0), CTRL)]], &b);
+        assert!((zoom - NOTCH).abs() < 1e-5, "one notch is one x1.1 step, got {zoom}");
+        assert_eq!((pan, snaps), (Vec2::ZERO, 0), "and the smoothed tail pans nothing");
+        let (_, out, _) = mapped(vec![vec![wheel(Vec2::new(0.0, -2.0), CTRL)]], &b);
+        assert!((out - 1.0 / (NOTCH * NOTCH)).abs() < 1e-5, "wheel down zooms out: {out}");
+    }
+
+    #[test]
+    fn shift_and_ctrl_wheel_can_do_different_things() {
+        let b = bindings(&[(CTRL, WheelAction::Zoom), (SHIFT, WheelAction::ScrollHorizontal)]);
+        let (pan, zoom, _) = mapped(vec![vec![wheel(Vec2::new(0.0, 1.0), SHIFT)]], &b);
+        assert_eq!(zoom, 1.0);
+        assert!(pan.x > 0.0 && pan.y == 0.0, "Shift + wheel scrolls sideways: {pan:?}");
+        let (pan, zoom, _) = mapped(vec![vec![wheel(Vec2::new(0.0, 1.0), CTRL)]], &b);
+        assert!(zoom > 1.0 && pan == Vec2::ZERO);
+    }
+
+    #[test]
+    fn a_sideways_wheel_still_counts_for_a_modifier_mapping() {
+        // Some systems deliver Shift + wheel as a horizontal wheel (x, y = 0).
+        let b = bindings(&[(SHIFT, WheelAction::ScrollVertical)]);
+        let (pan, _, _) = mapped(vec![vec![wheel(Vec2::new(1.0, 0.0), SHIFT)]], &b);
+        assert!(pan.y > 0.0 && pan.x == 0.0, "{pan:?}");
+    }
+
+    #[test]
+    fn alt_wheel_can_move_off_a_key_the_desktop_keeps() {
+        // Alt + wheel taken by the desktop: put the zoom on Ctrl + Alt, and Alt + wheel does nothing.
+        let ctrl_alt = Modifiers { ctrl: true, command: true, alt: true, ..Modifiers::NONE };
+        let b = bindings(&[(ctrl_alt, WheelAction::Zoom), (ALT, WheelAction::None)]);
+        let (pan, zoom, snaps) = mapped(vec![vec![wheel(Vec2::new(0.0, 1.0), ALT)]], &b);
+        assert_eq!((pan, zoom, snaps), (Vec2::ZERO, 1.0, 0));
+        let (_, zoom, _) = mapped(vec![vec![wheel(Vec2::new(0.0, 1.0), ctrl_alt)]], &b);
+        assert!(zoom > 1.0);
+    }
+
+    #[test]
+    fn mapped_zoom_snap_steps_the_ladder() {
+        let b = bindings(&[(CTRL, WheelAction::ZoomSnap)]);
+        let (_, zoom, snaps) = mapped(vec![vec![wheel(Vec2::new(0.0, 1.0), CTRL)], vec![wheel(Vec2::new(0.0, 1.0), CTRL)]], &b);
+        assert_eq!((snaps, zoom), (2, 1.0));
+    }
+
+    #[test]
+    fn a_plain_wheel_mapped_to_zoom_ignores_the_tail_and_leaves_other_gestures_alone() {
+        let b = bindings(&[(Modifiers::NONE, WheelAction::Zoom)]);
+        let (pan, zoom, _) = mapped(vec![vec![wheel(Vec2::new(0.0, 1.0), Modifiers::NONE)]], &b);
+        assert!((zoom - NOTCH).abs() < 1e-5 && pan == Vec2::ZERO, "{pan:?} {zoom}");
+        // Ctrl + wheel is not mapped: it still scrolls sideways.
+        let (pan, zoom, _) = mapped(vec![vec![wheel(Vec2::new(0.0, 1.0), CTRL)]], &b);
+        assert!(pan.x > 0.0 && zoom == 1.0, "{pan:?} {zoom}");
+    }
+
+    #[test]
+    fn a_mapped_scroll_moves_by_the_wheel_distance_and_hostile_numbers_do_nothing() {
+        let b = bindings(&[(CTRL, WheelAction::ScrollVertical)]);
+        let (pan, zoom, _) = mapped(vec![vec![wheel(Vec2::new(0.0, 1.0), CTRL)]], &b);
+        assert!((pan - Vec2::new(0.0, 40.0)).length() < 1e-3 && zoom == 1.0, "{pan:?}");
+        let b = bindings(&[(CTRL, WheelAction::Zoom), (SHIFT, WheelAction::ZoomSnap), (ALT, WheelAction::ScrollHorizontal)]);
+        // egui itself refuses NaN wheel events, so hand the mapping the numbers directly.
+        let ctx = Context::default();
+        for m in [CTRL, SHIFT, ALT] {
+            for delta in [Vec2::new(f32::NAN, f32::INFINITY), Vec2::splat(f32::MAX), Vec2::new(f32::NAN, 0.0)] {
+                let events = [(MouseWheelUnit::Line, delta, m)];
+                for notch in [40.0, 0.0, f32::NAN] {
+                    let got = mapped_gesture(&ctx, &b, &events, 1.0, Id::new("hostile"), notch, 800.0);
+                    assert!(got.is_none(), "{m:?} {delta:?} {notch}: {got:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_pinch_still_zooms_under_a_mapping() {
+        let b = bindings(&[(CTRL, WheelAction::ScrollVertical)]);
+        let (_, zoom, _) = mapped(vec![vec![Event::Zoom(1.5)]], &b);
+        assert!((zoom - 1.5).abs() < 1e-5, "{zoom}");
     }
 }

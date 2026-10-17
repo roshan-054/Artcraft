@@ -3212,3 +3212,19 @@ curves	Smooth	Glätten
 	GPU Memory (MB, 0 = Automatic)	GPU-Speicher (MB, 0 = Automatisch)
 	{name} was changed by another app after it was opened or saved here.	{name} wurde von einer anderen App geändert, nachdem es hier geöffnet oder gespeichert wurde.
 	Replace it with this document, or cancel and use File › Save As to keep both.	Ersetze die Datei durch dieses Dokument oder brich ab und nutze Datei › Speichern unter, um beide zu behalten.
+
+# Scroll Wheel Mapping (Preferences > General)
+	Scroll Wheel Mapping	Mausrad-Belegung
+	Scroll Wheel	Mausrad
+	Shift + Scroll Wheel	Shift + Mausrad
+	Ctrl/Cmd + Scroll Wheel	Strg/Cmd + Mausrad
+	Alt + Scroll Wheel	Alt + Mausrad
+	Shift + Alt + Scroll Wheel	Shift + Alt + Mausrad
+	Ctrl/Cmd + Shift + Scroll Wheel	Strg/Cmd + Shift + Mausrad
+	Ctrl/Cmd + Alt + Scroll Wheel	Strg/Cmd + Alt + Mausrad
+	Ctrl/Cmd + Shift + Alt + Scroll Wheel	Strg/Cmd + Shift + Alt + Mausrad
+	Default (as in Photoshop)	Standard (wie in Photoshop)
+	Scroll up and down	Hoch und runter scrollen
+	Scroll sideways	Seitwärts scrollen
+	Zoom to the next level	Zur nächsten Stufe zoomen
+	Do nothing	Nichts tun

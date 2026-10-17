@@ -3261,8 +3261,9 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
     let over_bars = ctx.data(|d| d.get_temp::<bool>(bars_id)).unwrap_or(false);
     let nav_hovered = response.hovered() || free_hover || over_bars;
     // Interface › Enable Animations off: the wheel moves the canvas without a glide (#5721).
-    let wheel = crate::wheel_nav::read_with(
+    let wheel = crate::wheel_nav::read_bound(
         &ctx,
+        &crate::wheel_nav::Bindings::from_prefs(&app.session.prefs().general),
         app.session.prefs().general.zoom_with_scroll_wheel,
         app.session.prefs().enhanced_controls.zoom_with_trackpad_pinch,
         response.id.with("wheel"),

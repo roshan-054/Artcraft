@@ -3216,3 +3216,19 @@ curves	Smooth	Lisser
 	Replace	Remplacer
 	{name} was changed by another app after it was opened or saved here.	{name} a été modifié par une autre application après avoir été ouvert ou enregistré ici.
 	Replace it with this document, or cancel and use File › Save As to keep both.	Remplacez-le par ce document, ou annulez et utilisez Fichier › Enregistrer sous pour garder les deux.
+
+# Scroll Wheel Mapping (Preferences > General)
+	Scroll Wheel Mapping	Affectation de la molette
+	Scroll Wheel	Molette
+	Shift + Scroll Wheel	Shift + Molette
+	Ctrl/Cmd + Scroll Wheel	Ctrl/Cmd + Molette
+	Alt + Scroll Wheel	Alt + Molette
+	Shift + Alt + Scroll Wheel	Shift + Alt + Molette
+	Ctrl/Cmd + Shift + Scroll Wheel	Ctrl/Cmd + Shift + Molette
+	Ctrl/Cmd + Alt + Scroll Wheel	Ctrl/Cmd + Alt + Molette
+	Ctrl/Cmd + Shift + Alt + Scroll Wheel	Ctrl/Cmd + Shift + Alt + Molette
+	Default (as in Photoshop)	Par défaut (comme dans Photoshop)
+	Scroll up and down	Défiler verticalement
+	Scroll sideways	Défiler horizontalement
+	Zoom to the next level	Zoomer au niveau suivant
+	Do nothing	Ne rien faire

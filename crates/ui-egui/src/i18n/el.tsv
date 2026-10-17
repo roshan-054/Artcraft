@@ -3910,3 +3910,19 @@ curves	Smooth	Εξομάλυνση
 	GPU Memory (MB, 0 = Automatic)	Μνήμη GPU (MB, 0 = Αυτόματο)
 	{name} was changed by another app after it was opened or saved here.	Το {name} άλλαξε από άλλη εφαρμογή αφού ανοίχτηκε ή αποθηκεύτηκε εδώ.
 	Replace it with this document, or cancel and use File › Save As to keep both.	Αντικαταστήστε το με αυτό το έγγραφο ή ακυρώστε και χρησιμοποιήστε Αρχείο › Αποθήκευση ως για να κρατήσετε και τα δύο.
+
+# Scroll Wheel Mapping (Preferences > General)
+	Scroll Wheel Mapping	Αντιστοίχιση τροχού κύλισης
+	Scroll Wheel	Τροχός κύλισης
+	Shift + Scroll Wheel	Shift + Τροχός κύλισης
+	Ctrl/Cmd + Scroll Wheel	Ctrl/Cmd + Τροχός κύλισης
+	Alt + Scroll Wheel	Alt + Τροχός κύλισης
+	Shift + Alt + Scroll Wheel	Shift + Alt + Τροχός κύλισης
+	Ctrl/Cmd + Shift + Scroll Wheel	Ctrl/Cmd + Shift + Τροχός κύλισης
+	Ctrl/Cmd + Alt + Scroll Wheel	Ctrl/Cmd + Alt + Τροχός κύλισης
+	Ctrl/Cmd + Shift + Alt + Scroll Wheel	Ctrl/Cmd + Shift + Alt + Τροχός κύλισης
+	Default (as in Photoshop)	Προεπιλογή (όπως στο Photoshop)
+	Scroll up and down	Κύλιση πάνω και κάτω
+	Scroll sideways	Κύλιση στα πλάγια
+	Zoom to the next level	Ζουμ στο επόμενο επίπεδο
+	Do nothing	Καμία ενέργεια

@@ -3887,3 +3887,19 @@ curves	Smooth	スムーズ
 	Replace	置き換え
 	{name} was changed by another app after it was opened or saved here.	{name} は、ここで開くか保存した後に別のアプリで変更されました。
 	Replace it with this document, or cancel and use File › Save As to keep both.	この書類で置き換えるか、キャンセルしてファイル › 名前を付けて保存で両方を残してください。
+
+# Scroll Wheel Mapping (Preferences > General)
+	Scroll Wheel Mapping	スクロールホイールの割り当て
+	Scroll Wheel	スクロールホイール
+	Shift + Scroll Wheel	Shift + スクロールホイール
+	Ctrl/Cmd + Scroll Wheel	Ctrl/Cmd + スクロールホイール
+	Alt + Scroll Wheel	Alt + スクロールホイール
+	Shift + Alt + Scroll Wheel	Shift + Alt + スクロールホイール
+	Ctrl/Cmd + Shift + Scroll Wheel	Ctrl/Cmd + Shift + スクロールホイール
+	Ctrl/Cmd + Alt + Scroll Wheel	Ctrl/Cmd + Alt + スクロールホイール
+	Ctrl/Cmd + Shift + Alt + Scroll Wheel	Ctrl/Cmd + Shift + Alt + スクロールホイール
+	Default (as in Photoshop)	既定（Photoshop と同じ）
+	Scroll up and down	上下にスクロール
+	Scroll sideways	左右にスクロール
+	Zoom to the next level	次のレベルにズーム
+	Do nothing	何もしない

@@ -915,3 +915,44 @@ fn a_stranded_backup_is_named_in_the_error() {
     assert_eq!(std::fs::read_to_string(&b).unwrap(), "old B");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Scroll Wheel Mapping: every modifier combination starts at the Photoshop behaviour, picks its
+/// own action, ignores a bad name, and old settings files without the keys still load.
+#[test]
+fn scroll_wheel_mapping_defaults_validates_and_round_trips() {
+    let mut s = Session::new();
+    let mut combos = Vec::new();
+    for shift in [false, true] {
+        for ctrl in [false, true] {
+            for alt in [false, true] {
+                assert_eq!(s.prefs().general.wheel_action(shift, ctrl, alt), WheelAction::Default);
+                combos.push((shift, ctrl, alt));
+            }
+        }
+    }
+    assert_eq!(combos.len(), 8);
+    s.execute("prefs.set", json!({"path": "general.wheelActionCtrl", "value": "zoomContinuous"})).unwrap();
+    s.execute("prefs.set", json!({"path": "general.wheelActionCtrlShiftAlt", "value": "doNothing"})).unwrap();
+    s.execute("prefs.set", json!({"path": "general.wheelActionShift", "value": "scrollHorizontal"})).unwrap();
+    let g = &s.prefs().general;
+    assert_eq!(g.wheel_action(false, true, false), WheelAction::Zoom);
+    assert_eq!(g.wheel_action(true, true, true), WheelAction::None);
+    assert_eq!(g.wheel_action(true, false, false), WheelAction::ScrollHorizontal);
+    assert_eq!(g.wheel_action(false, false, false), WheelAction::Default, "the others are untouched");
+    // Every combination is its own setting with a dropdown of the same six choices.
+    for k in ["Plain", "Shift", "Ctrl", "Alt", "ShiftAlt", "CtrlShift", "CtrlAlt", "CtrlShiftAlt"] {
+        assert_eq!(choices(&format!("general.wheelAction{k}")), Some(WheelAction::NAMES), "{k}");
+    }
+    assert_eq!(WheelAction::NAMES.len(), 6);
+    assert!(s.execute("prefs.set", json!({"path": "general.wheelActionAlt", "value": "teleport"})).is_err());
+    assert_eq!(s.prefs().general.wheel_action(false, false, true), WheelAction::Default);
+    // Saved and restored, and a settings file from before the mapping keeps loading.
+    let saved = s.prefs_to_json();
+    let mut again = Session::new();
+    again.load_prefs_json(&saved).unwrap();
+    assert_eq!(again.prefs().general.wheel_action(false, true, false), WheelAction::Zoom);
+    let mut old = Session::new();
+    old.load_prefs_json(r#"{"general":{"zoomWithScrollWheel":true}}"#).unwrap();
+    assert!(old.prefs().general.zoom_with_scroll_wheel);
+    assert_eq!(old.prefs().general.wheel_action(false, true, false), WheelAction::Default);
+}

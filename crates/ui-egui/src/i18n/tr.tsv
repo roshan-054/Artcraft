@@ -3940,3 +3940,19 @@ cameraData	Lens	Lens
 	GPU Memory (MB, 0 = Automatic)	GPU Belleği (MB, 0 = Otomatik)
 	{name} was changed by another app after it was opened or saved here.	{name}, burada açıldıktan veya kaydedildikten sonra başka bir uygulama tarafından değiştirildi.
 	Replace it with this document, or cancel and use File › Save As to keep both.	Bu belgeyle değiştirin ya da iptal edip ikisini de korumak için Dosya › Farklı Kaydet'i kullanın.
+
+# Scroll Wheel Mapping (Preferences > General)
+	Scroll Wheel Mapping	Kaydırma tekerleği eşlemesi
+	Scroll Wheel	Kaydırma tekerleği
+	Shift + Scroll Wheel	Shift + Kaydırma tekerleği
+	Ctrl/Cmd + Scroll Wheel	Ctrl/Cmd + Kaydırma tekerleği
+	Alt + Scroll Wheel	Alt + Kaydırma tekerleği
+	Shift + Alt + Scroll Wheel	Shift + Alt + Kaydırma tekerleği
+	Ctrl/Cmd + Shift + Scroll Wheel	Ctrl/Cmd + Shift + Kaydırma tekerleği
+	Ctrl/Cmd + Alt + Scroll Wheel	Ctrl/Cmd + Alt + Kaydırma tekerleği
+	Ctrl/Cmd + Shift + Alt + Scroll Wheel	Ctrl/Cmd + Shift + Alt + Kaydırma tekerleği
+	Default (as in Photoshop)	Varsayılan (Photoshop'taki gibi)
+	Scroll up and down	Yukarı ve aşağı kaydır
+	Scroll sideways	Yana kaydır
+	Zoom to the next level	Sonraki seviyeye yakınlaştır
+	Do nothing	Hiçbir şey yapma

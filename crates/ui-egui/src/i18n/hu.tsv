@@ -4129,3 +4129,19 @@ cameraRaw	Yellow	Sárga
 	GPU Memory (MB, 0 = Automatic)	GPU-memória (MB, 0 = Automatikus)
 	{name} was changed by another app after it was opened or saved here.	A(z) {name} fájlt egy másik alkalmazás módosította, miután itt megnyitották vagy mentették.
 	Replace it with this document, or cancel and use File › Save As to keep both.	Cserélje le erre a dokumentumra, vagy válassza a Mégse gombot, és a Fájl › Mentés másként paranccsal tartsa meg mindkettőt.
+
+# Scroll Wheel Mapping (Preferences > General)
+	Scroll Wheel Mapping	Görgő-hozzárendelés
+	Scroll Wheel	Görgő
+	Shift + Scroll Wheel	Shift + Görgő
+	Ctrl/Cmd + Scroll Wheel	Ctrl/Cmd + Görgő
+	Alt + Scroll Wheel	Alt + Görgő
+	Shift + Alt + Scroll Wheel	Shift + Alt + Görgő
+	Ctrl/Cmd + Shift + Scroll Wheel	Ctrl/Cmd + Shift + Görgő
+	Ctrl/Cmd + Alt + Scroll Wheel	Ctrl/Cmd + Alt + Görgő
+	Ctrl/Cmd + Shift + Alt + Scroll Wheel	Ctrl/Cmd + Shift + Alt + Görgő
+	Default (as in Photoshop)	Alapértelmezett (mint a Photoshopban)
+	Scroll up and down	Görgetés fel és le
+	Scroll sideways	Görgetés oldalra
+	Zoom to the next level	Nagyítás a következő szintre
+	Do nothing	Ne csináljon semmit

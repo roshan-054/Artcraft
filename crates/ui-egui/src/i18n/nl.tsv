@@ -3970,3 +3970,19 @@ curves	Smooth	Vloeiend maken
 	GPU Memory (MB, 0 = Automatic)	GPU-geheugen (MB, 0 = Automatisch)
 	{name} was changed by another app after it was opened or saved here.	{name} is door een andere app gewijzigd nadat het hier is geopend of bewaard.
 	Replace it with this document, or cancel and use File › Save As to keep both.	Vervang het door dit document, of annuleer en gebruik Bestand › Opslaan als om beide te houden.
+
+# Scroll Wheel Mapping (Preferences > General)
+	Scroll Wheel Mapping	Scrollwiel-toewijzing
+	Scroll Wheel	Scrollwiel
+	Shift + Scroll Wheel	Shift + Scrollwiel
+	Ctrl/Cmd + Scroll Wheel	Ctrl/Cmd + Scrollwiel
+	Alt + Scroll Wheel	Alt + Scrollwiel
+	Shift + Alt + Scroll Wheel	Shift + Alt + Scrollwiel
+	Ctrl/Cmd + Shift + Scroll Wheel	Ctrl/Cmd + Shift + Scrollwiel
+	Ctrl/Cmd + Alt + Scroll Wheel	Ctrl/Cmd + Alt + Scrollwiel
+	Ctrl/Cmd + Shift + Alt + Scroll Wheel	Ctrl/Cmd + Shift + Alt + Scrollwiel
+	Default (as in Photoshop)	Standaard (zoals in Photoshop)
+	Scroll up and down	Omhoog en omlaag scrollen
+	Scroll sideways	Zijwaarts scrollen
+	Zoom to the next level	Inzoomen naar het volgende niveau
+	Do nothing	Niets doen

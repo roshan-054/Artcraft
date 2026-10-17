@@ -4283,3 +4283,19 @@ shape	Appearance	Izgled
 	GPU Memory (MB, 0 = Automatic)	GPU memorija (MB, 0 = Automatski)
 	{name} was changed by another app after it was opened or saved here.	Datoteku {name} je izmenila druga aplikacija nakon što je ovde otvorena ili sačuvana.
 	Replace it with this document, or cancel and use File › Save As to keep both.	Zameni je ovim dokumentom ili otkaži i koristi Datoteka › Sačuvaj kao da zadržiš obe.
+
+# Scroll Wheel Mapping (Preferences > General)
+	Scroll Wheel Mapping	Dodela točkića miša
+	Scroll Wheel	Točkić miša
+	Shift + Scroll Wheel	Shift + Točkić miša
+	Ctrl/Cmd + Scroll Wheel	Ctrl/Cmd + Točkić miša
+	Alt + Scroll Wheel	Alt + Točkić miša
+	Shift + Alt + Scroll Wheel	Shift + Alt + Točkić miša
+	Ctrl/Cmd + Shift + Scroll Wheel	Ctrl/Cmd + Shift + Točkić miša
+	Ctrl/Cmd + Alt + Scroll Wheel	Ctrl/Cmd + Alt + Točkić miša
+	Ctrl/Cmd + Shift + Alt + Scroll Wheel	Ctrl/Cmd + Shift + Alt + Točkić miša
+	Default (as in Photoshop)	Podrazumevano (kao u Photoshopu)
+	Scroll up and down	Pomeraj gore i dole
+	Scroll sideways	Pomeraj u stranu
+	Zoom to the next level	Zumiraj na sledeći nivo
+	Do nothing	Ne radi ništa
