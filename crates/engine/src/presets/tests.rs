@@ -759,7 +759,7 @@ fn a_damaged_preset_set_keeps_the_other_sets() {
     let settings = json!({"width": 1600, "height": 900, "resolution": 144});
     s.execute("document.presets.save", json!({"name": "Banner", "settings": settings})).unwrap();
     let saved = s.presets.to_json(&s);
-    for key in ["gradients", "gradient", "styles", "shapes", "pattern_groups", "custom_shapes", "layer_defaults", "swatches"] {
+    for key in ["gradients", "gradient", "styles", "shapes", "pattern_groups", "export_presets", "custom_shapes", "layer_defaults", "swatches"] {
         let mut blob = saved.clone();
         blob[key] = json!("not a preset set");
         let mut next = Session::new();
@@ -769,7 +769,7 @@ fn a_damaged_preset_set_keeps_the_other_sets() {
     }
     // Null sets keep their defaults, as before.
     let mut next = Session::new();
-    next.load_presets_json(json!({"tool_presets": null, "gradients": null, "documents": saved["documents"].clone()}));
+    next.load_presets_json(json!({"tool_presets": null, "gradients": null, "export_presets": null, "documents": saved["documents"].clone()}));
     assert_eq!(next.presets.tool_presets.len(), Session::new().presets.tool_presets.len());
     assert_eq!(next.presets.gradients.len(), Session::new().presets.gradients.len());
     assert_eq!(next.presets.documents, s.presets.documents);

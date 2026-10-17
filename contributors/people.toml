@@ -162,3 +162,7 @@ sync_github_name = true
 [people.sidney]
 real_name = "Sidney Markowitz"
 sync_github_name = true
+
+[people.Aditya-kumar-yadav]
+real_name = "Aditya Kumar Yadav"
+sync_github_name = true
