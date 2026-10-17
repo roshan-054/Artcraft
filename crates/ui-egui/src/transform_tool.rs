@@ -1765,19 +1765,25 @@ pub(crate) fn apply_drag(s: &mut TransformSession, g: Gesture, p: [f64; 2], mods
             };
             // Each axis scales by a factor `k` about an anchor: the opposite side, or with ⌥ the
             // reference point, wherever it was set (#1329). The dragged handle follows the cursor.
-            let axis = |moving: (bool, bool), at: f64, pivot: f64| -> (f64, f64) {
+            let axis = |moving: (bool, bool), at: f64, pivot: f64| -> (f64, Option<f64>) {
                 if !moving.0 && !moving.1 {
-                    return (0.5, 1.0);
+                    return (0.5, Some(1.0));
                 }
                 let handle = if moving.0 { 0.0 } else { 1.0 };
                 let anchor = if mods.alt { pivot } else { 1.0 - handle };
                 let d = handle - anchor;
                 // A reference point on the dragged side leaves nothing to scale against.
-                let k = if d.abs() > 1e-9 { (at - anchor) / d } else { 1.0 };
-                (anchor, if k.is_finite() { k } else { 1.0 })
+                let k = if d.abs() > 1e-9 {
+                    let k = (at - anchor) / d;
+                    k.is_finite().then_some(k)
+                } else {
+                    None
+                };
+                (anchor, k)
             };
-            let (mut au, mut ku) = axis(mu, u, pu);
-            let (mut av, mut kv) = axis(mv, v, pv);
+            let (mut au, gu) = axis(mu, u, pu);
+            let (mut av, gv) = axis(mv, v, pv);
+            let (mut ku, mut kv) = (gu.unwrap_or(1.0), gv.unwrap_or(1.0));
             // Corners and edges scale proportionally by default; ⇧ frees them (the legacy
             // preference swaps the two for corners and always stretches edges, `legacy_mods`).
             let corner = matches!(g.hit, Hit::Corner(_));
@@ -1793,7 +1799,12 @@ pub(crate) fn apply_drag(s: &mut TransformSession, g: Gesture, p: [f64; 2], mods
                 }
             }
             if corner && !mods.shift {
-                let k = ku.abs().max(kv.abs());
+                // An axis through the pivot has no factor and must not prevent shrinking.
+                let k = match (gu, gv) {
+                    (Some(a), Some(b)) => a.abs().max(b.abs()),
+                    (Some(a), None) | (None, Some(a)) => a.abs(),
+                    (None, None) => 1.0,
+                };
                 (ku, kv) = (k * ku.signum(), k * kv.signum());
             }
             let r = [au - au * ku, av - av * kv, au + (1.0 - au) * ku, av + (1.0 - av) * kv];
@@ -3781,6 +3792,30 @@ mod tests {
         s.pivot = [100.0, 50.0];
         drag(&mut s, [100.0, 0.0], [150.0, -50.0], egui::Modifiers { alt: true, shift: true, ..Default::default() });
         assert!(close(s.quad, corners([0.0, -50.0, 100.0, 50.0])), "{:?}", s.quad);
+    }
+
+    #[test]
+    fn alt_corner_shrinks_when_reference_point_is_on_a_dragged_axis() {
+        for (pivot, from, to, bounds) in [
+            ([100.0, 25.0], [100.0, 0.0], [100.0, 12.5], [50.0, 12.5, 100.0, 37.5]),
+            ([0.0, 25.0], [0.0, 0.0], [0.0, 12.5], [0.0, 12.5, 50.0, 37.5]),
+            ([50.0, 0.0], [100.0, 0.0], [75.0, 0.0], [25.0, 0.0, 75.0, 25.0]),
+            ([50.0, 50.0], [100.0, 50.0], [75.0, 50.0], [25.0, 25.0, 75.0, 50.0]),
+            ([100.0, 25.0], [100.0, 0.0], [100.0, 37.5], [50.0, 37.5, 100.0, 12.5]),
+        ] {
+            let mut s = session();
+            s.pivot = pivot;
+            drag(&mut s, from, to, egui::Modifiers::ALT);
+            assert!(close(s.quad, corners(bounds)), "pivot {pivot:?}: {:?}", s.quad);
+            assert!(near(s.pivot, pivot));
+            assert!(s.quad.iter().flatten().all(|value| value.is_finite()));
+        }
+        let mut s = session();
+        s.pivot = [100.0, 0.0];
+        let gesture = Gesture { hit: Hit::Corner(1), start: s.pivot, quad0: s.quad, pivot0: s.pivot };
+        apply_drag(&mut s, gesture, [100.0, 12.5], egui::Modifiers::ALT);
+        assert!(close(s.quad, corners([0.0, 0.0, 100.0, 50.0])));
+        assert!(near(s.pivot, [100.0, 0.0]));
     }
 
     fn near(a: [f64; 2], b: [f64; 2]) -> bool {
