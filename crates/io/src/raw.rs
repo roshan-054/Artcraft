@@ -225,7 +225,19 @@ pub fn fit_preview_look(raw: &[u8], sensor: &Sensor, opts: &DevelopOptions) -> R
         t.convert_u8(&rgb, 3, &mut out, 3, false);
         rgb = Cow::Owned(out);
     }
-    photocraft_raw::fit_look(sensor, opts, &Reference { width: w, height: h, rgb: &rgb }).map_err(|e| e.to_string())
+    let reference = Reference { width: w, height: h, rgb: &rgb };
+    // Sony's aspect-ratio setting crops its JPEG, not the raw's DefaultCrop. Fit only the
+    // camera-recorded area when the preview has that shape; preserve the full output crop.
+    let same_shape = |area: photocraft_raw::Rect| {
+        let (aw, ah) = if (5..=8).contains(&sensor.orientation) { (area.height, area.width) } else { (area.width, area.height) };
+        aw > 0 && ah > 0 && ((f64::from(w) / f64::from(h)) / (aw as f64 / ah as f64)).ln().abs() <= 0.03
+    };
+    let area = if same_shape(sensor.crop) {
+        sensor.crop
+    } else {
+        photocraft_raw::embedded_preview_crop(raw).filter(|a| a.intersect(&sensor.crop) == *a && same_shape(*a)).unwrap_or(sensor.crop)
+    };
+    photocraft_raw::fit_look_in_area(sensor, opts, &reference, area).map_err(|e| e.to_string())
 }
 
 /// Decodes and develops; a file without colour calibration gets a look fitted to its preview.

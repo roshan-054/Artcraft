@@ -131,6 +131,15 @@ For a slightly tighter camera JPEG, fitting can align the reference proxy using 
 90–100% centred search on training cells. It requires a strong correlation improvement and
 retains the held-out colour gates; the developed crop and camera calibration are unchanged.
 
+Sony files can also record a camera-rendered preview crop in SonyCropTopLeft (0x74c7) and
+SonyCropSize (0x74c8), distinct from the full raw DefaultCrop. `embedded_preview_crop` reads
+that bounded rectangle; `fit_look_in_area` fits only its sensor pixels without copying the
+sensor buffer or changing the output crop. The import layer uses it only when its upright
+shape matches the preview and the full raw's shape does not. The existing correlation,
+colour-content and held-out improvement gates remain required. A ZV-E10 with a 16:9 preview
+and a 3:2 raw can therefore use its camera rendering while keeping all raw image pixels.
+This is still a per-file camera-look estimate, not a measured camera calibration.
+
 Without a usable fit (no preview, an unrelated, monochrome or differently shaped one, or a fit that
 does not clearly help) the documented neutral fallback stays: the white-balanced camera channels are
 treated as linear sRGB primaries, with no tone curve (plausible but flat, greyish colours; converting

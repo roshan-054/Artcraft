@@ -46,7 +46,7 @@ use std::fmt;
 use crate::color::{self, Mat3};
 use crate::develop::{DevelopOptions, Scale, resolve_neutral, source_xy};
 use crate::par;
-use crate::sensor::Sensor;
+use crate::sensor::{Rect, Sensor};
 
 /// Long edge of the fit grid, in cells.
 pub const PROXY_EDGE: usize = 256;
@@ -198,7 +198,17 @@ struct Cell {
 /// Fits a [`CameraLook`] so that developing `s` with `opts` (white balance,
 /// baseline exposure) matches the camera's `reference` rendering of it.
 pub fn fit_look(s: &Sensor, opts: &DevelopOptions, reference: &Reference) -> Result<CameraLook, LookRejected> {
-    let (gw, mut cells) = grid(s, opts, reference)?;
+    fit_look_in_area(s, opts, reference, s.crop)
+}
+
+/// Fits against a camera-recorded preview area in sensor coordinates, without changing the
+/// developed image's crop or copying its sensor buffer. The area must be inside `s.crop`;
+/// the usual shape, picture-correlation and held-out colour gates still apply.
+pub fn fit_look_in_area(s: &Sensor, opts: &DevelopOptions, reference: &Reference, area: Rect) -> Result<CameraLook, LookRejected> {
+    if area.is_empty() || area.intersect(&s.crop) != area {
+        return reject("the preview area lies outside the developed crop");
+    }
+    let (gw, mut cells) = grid(s, opts, reference, area)?;
     align_preview(&mut cells, gw, s.baseline_exposure);
     fit_cells(&cells, gw, s.baseline_exposure)
 }
@@ -290,8 +300,7 @@ fn aligned_camera(cells: &[Cell], w: usize, h: usize, x: usize, y: usize, scale:
 }
 
 /// The upright fit grid: (width in cells, cells row-major).
-fn grid(s: &Sensor, opts: &DevelopOptions, r: &Reference) -> Result<(usize, Vec<Cell>), LookRejected> {
-    let c = s.crop;
+fn grid(s: &Sensor, opts: &DevelopOptions, r: &Reference, c: Rect) -> Result<(usize, Vec<Cell>), LookRejected> {
     let in_data = c.x.checked_add(c.width).is_some_and(|v| v <= s.width) && c.y.checked_add(c.height).is_some_and(|v| v <= s.height);
     let need = s.width.checked_mul(s.height).and_then(|v| v.checked_mul(s.samples));
     if c.is_empty() || !in_data || need.is_none_or(|n| s.data.len() < n) {
@@ -918,7 +927,7 @@ mod tests {
             tight.extend_from_slice(&rgb[(y * w + x0) * 3..(y * w + x0 + cw) * 3]);
         }
         let reference = Reference { width: cw as u32, height: ch as u32, rgb: &tight };
-        let (gw, plain) = grid(&s, &wb_opts(), &reference).unwrap();
+        let (gw, plain) = grid(&s, &wb_opts(), &reference, s.crop).unwrap();
         let before = fit_cells(&plain, gw, s.baseline_exposure);
         let look = fit_look(&s, &wb_opts(), &reference).unwrap();
         assert!(look.delta_e < 3.0, "{look:?}");
@@ -928,6 +937,35 @@ mod tests {
         let d = crate::develop_sensor(&s, &DevelopOptions { camera_look: Some(look), ..wb_opts() }).unwrap();
         assert_eq!((d.width as usize, d.height as usize), (w, h));
         assert_eq!(s.crop, crate::Rect::new(0, 0, w, h));
+    }
+
+    #[test]
+    fn a_recorded_preview_area_fits_without_cropping_the_developed_image() {
+        let (w, h) = (480, 320);
+        let (mut s, rgb) = shot(w, h, &true_matrix());
+        let area = Rect::new(0, 24, w, 272);
+        let cropped = &rgb[area.y * w * 3..(area.y + area.height) * w * 3];
+        for orientation in [1, 6, 8] {
+            s.orientation = orientation;
+            let (rw, rh) = if orientation == 1 { (w, area.height) } else { (area.height, w) };
+            let mut upright = vec![0u8; cropped.len()];
+            for y in 0..rh {
+                for x in 0..rw {
+                    let (sx, sy) = source_xy(orientation, w, area.height, x, y);
+                    upright[(y * rw + x) * 3..(y * rw + x + 1) * 3].copy_from_slice(&cropped[(sy * w + sx) * 3..(sy * w + sx + 1) * 3]);
+                }
+            }
+            let reference = Reference { width: rw as u32, height: rh as u32, rgb: &upright };
+            assert!(fit_look(&s, &wb_opts(), &reference).is_err(), "a cropped preview cannot be stretched onto the full raw");
+            let look = fit_look_in_area(&s, &wb_opts(), &reference, area).unwrap();
+            assert!(look.delta_e < 1.5, "{look:?}");
+            let d = crate::develop_sensor(&s, &DevelopOptions { camera_look: Some(look), ..wb_opts() }).unwrap();
+            assert_eq!((d.width, d.height), if orientation == 1 { (w as u32, h as u32) } else { (h as u32, w as u32) });
+            for bad in [Rect::new(0, 0, 0, 0), Rect::new(1, 0, w, h), Rect::new(usize::MAX, 0, 2, 2)] {
+                assert!(fit_look_in_area(&s, &wb_opts(), &reference, bad).is_err());
+            }
+        }
+        assert_eq!(s.crop, Rect::new(0, 0, w, h));
     }
 
     #[test]

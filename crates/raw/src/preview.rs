@@ -1,6 +1,32 @@
 //! Finding the camera-rendered JPEG preview embedded in a raw file.
 
+use crate::sensor::Rect;
 use crate::tiff::{Tiff, tag};
+
+/// Sony's camera-rendered crop in sensor coordinates. SonyCropTopLeft (0x74c7) and
+/// SonyCropSize (0x74c8) are documented in https://exiftool.org/TagNames/EXIF.html.
+/// A ZV-E10 can record a 16:9 preview while DefaultCrop keeps the full 3:2 raw.
+/// This rectangle aligns a colour-fit reference; it must not replace the output crop.
+/// Missing, malformed, non-Sony and out-of-bounds metadata returns `None`.
+pub fn embedded_preview_crop(bytes: &[u8]) -> Option<Rect> {
+    let t = Tiff::new(bytes)?;
+    let ifd0 = t.ifd_at(t.first_ifd, 0)?;
+    if ifd0.has(tag::DNG_VERSION) || t.tag_ascii(&ifd0, tag::MAKE)?.trim() != "SONY" {
+        return None;
+    }
+    let ifds = t.all_ifds();
+    let raw = ifds
+        .iter()
+        .filter(|i| t.tag_uint(i, tag::PHOTOMETRIC) == Some(32803))
+        .max_by_key(|i| u64::from(t.tag_uint(i, tag::IMAGE_WIDTH).unwrap_or(0)) * u64::from(t.tag_uint(i, tag::IMAGE_LENGTH).unwrap_or(0)))?;
+    let origin = t.tag_uints(raw, 0x74c7);
+    let size = t.tag_uints(raw, 0x74c8);
+    let ([x, y], [w, h]) = (origin.as_slice(), size.as_slice()) else { return None };
+    if *w == 0 || *h == 0 || x.checked_add(*w)? > t.tag_uint(raw, tag::IMAGE_WIDTH)? || y.checked_add(*h)? > t.tag_uint(raw, tag::IMAGE_LENGTH)? {
+        return None;
+    }
+    Some(Rect::new(*x as usize, *y as usize, *w as usize, *h as usize))
+}
 
 /// An embedded baseline-JPEG preview.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -133,6 +159,32 @@ pub fn embedded_preview_color_space(bytes: &[u8]) -> Option<PreviewColorSpace> {
 mod tests {
     use super::*;
     use crate::testgen::{TiffBuilder, Val};
+
+    #[test]
+    fn sony_preview_crop_is_metadata_bounded_and_not_an_output_crop() {
+        let build = |make: &str, origin: Vec<u32>, size: Vec<u32>| {
+            crate::testgen::tiff_ep(make, 6048, 4024, &[], [0, 1, 1, 2], 14, vec![(0x74c7, Val::Long(origin)), (0x74c8, Val::Long(size))])
+        };
+        let good = build("SONY", vec![12, 324], vec![6000, 3376]);
+        assert_eq!(embedded_preview_crop(&good), Some(Rect::new(12, 324, 6000, 3376)));
+        for (origin, size) in [
+            (vec![12, 324], vec![6000, 4000]),
+            (vec![u32::MAX, 12], vec![6000, 3376]),
+            (vec![12, 324], vec![0, 3376]),
+            (vec![12], vec![6000, 3376]),
+            (vec![12, 324], vec![6000, 3376, 1]),
+        ] {
+            assert_eq!(embedded_preview_crop(&build("SONY", origin, size)), None);
+        }
+        assert_eq!(embedded_preview_crop(&build("NIKON CORPORATION", vec![12, 324], vec![6000, 3376])), None);
+        for end in (0..good.len()).step_by(7) {
+            let _ = embedded_preview_crop(&good[..end]);
+        }
+        let mut dng = crate::testgen::DngSpec::cfa(40, 30, vec![0; 1200]);
+        dng.make = "SONY".into();
+        dng.ifd0_extra = vec![(0x74c7, Val::Long(vec![0, 0])), (0x74c8, Val::Long(vec![40, 20]))];
+        assert_eq!(embedded_preview_crop(&dng.build()), None);
+    }
 
     /// A raw-like TIFF whose EXIF IFD has `color_space` and, when given, an Interoperability IFD with `index`.
     fn raw_with(color_space: Option<u16>, index: Option<&str>, dng: bool) -> Vec<u8> {

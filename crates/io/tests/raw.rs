@@ -203,6 +203,72 @@ fn fallback(warnings: &[String]) -> bool {
     warnings.iter().any(|w| w.contains("sRGB primaries"))
 }
 
+/// The ZV-E10's 16:9 JPEG describes only part of its 3:2 raw. No measured colour table is
+/// needed to exercise the import: the synthetic camera's own rendering is the reference.
+fn sony_with_cropped_preview(orientation: u16, valid_crop: bool) -> Vec<u8> {
+    let (w, h, y, ch) = (480usize, 320usize, 24usize, 272usize);
+    let cam = patches(w, h);
+    let jpg = camera_rendering(&cam[y * w..(y + ch) * w], w, ch);
+    let data = mosaic(&cam, w, [0, 1, 1, 2], 0, 4095);
+    let mut t = TiffBuilder::default();
+    let strip = t.blob(data.iter().flat_map(|v| v.to_le_bytes()).collect());
+    let preview = t.blob(jpg.clone());
+    let raw = t.ifd(vec![
+        (256, Val::Long(vec![w as u32])),
+        (257, Val::Long(vec![h as u32])),
+        (258, Val::Short(vec![12])),
+        (259, Val::Short(vec![1])),
+        (262, Val::Short(vec![32803])),
+        (273, Val::Blobs(vec![strip])),
+        (277, Val::Short(vec![1])),
+        (278, Val::Long(vec![h as u32])),
+        (279, Val::Long(vec![(data.len() * 2) as u32])),
+        (33421, Val::Short(vec![2, 2])),
+        (33422, Val::Byte(vec![0, 1, 1, 2])),
+        (0x74c7, Val::Long(vec![0, if valid_crop { y as u32 } else { u32::MAX }])),
+        (0x74c8, Val::Long(vec![w as u32, ch as u32])),
+    ]);
+    let ifd0 = t.ifd(vec![
+        (271, Val::Ascii("SONY".into())),
+        (272, Val::Ascii("ZV-E10".into())),
+        (274, Val::Short(vec![orientation])),
+        (330, Val::Ifds(vec![raw])),
+        (513, Val::Blobs(vec![preview])),
+        (514, Val::Long(vec![jpg.len() as u32])),
+    ]);
+    t.chain = vec![ifd0];
+    t.build()
+}
+
+#[test]
+fn sony_cropped_preview_fits_default_and_tuned_import_without_trimming_the_raw() {
+    for orientation in [1, 6, 8] {
+        let bytes = sony_with_cropped_preview(orientation, true);
+        let sensor = photocraft_raw::decode(&bytes, &Default::default()).unwrap();
+        let before_crop = sensor.crop;
+        let opened = import("camera.ARW", &bytes).unwrap();
+        let expected_size = if orientation == 1 { (480, 320) } else { (320, 480) };
+        assert_eq!((opened.document.size.width, opened.document.size.height), expected_size);
+        assert!(fitted(&opened.warnings) && !fallback(&opened.warnings), "{:?}", opened.warnings);
+        assert_eq!(sensor.crop, before_crop);
+        for exposure in [0.0, 1.0] {
+            let (tuned, _) =
+                photocraft_io::raw::import_raw_tuned("camera.ARW", &bytes, &photocraft_io::raw::RawTuning { exposure, ..Default::default() }).unwrap();
+            assert_eq!((tuned.document.size.width, tuned.document.size.height), expected_size);
+            assert!(fitted(&tuned.warnings) && !fallback(&tuned.warnings), "{:?}", tuned.warnings);
+        }
+        assert!(!photocraft_io::raw::tone_curve(&bytes).is_empty());
+    }
+}
+
+#[test]
+fn invalid_sony_preview_crop_keeps_the_explicit_uncalibrated_fallback() {
+    let bytes = sony_with_cropped_preview(1, false);
+    let opened = import("camera.ARW", &bytes).unwrap();
+    assert!(fallback(&opened.warnings) && !fitted(&opened.warnings), "{:?}", opened.warnings);
+    assert_eq!((opened.document.size.width, opened.document.size.height), (480, 320));
+}
+
 #[test]
 fn uncalibrated_raw_takes_its_colour_from_the_camera_jpeg() {
     let (w, h) = (480, 320);
